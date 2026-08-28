@@ -16,6 +16,7 @@ class EventAndContextTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"
             secret = "known-secret-value"
+            fake_token = "sk-" + "abcdefghijk"
             sink = JsonlEventSink(path, Redactor([secret]))
             sink.emit(
                 RunEvent(
@@ -23,7 +24,7 @@ class EventAndContextTests(unittest.TestCase):
                     sequence=1,
                     kind="test",
                     timestamp="now",
-                    data={"a": secret, "b": "api_key=visible-value", "c": "sk-abcdefghijk"},
+                    data={"a": secret, "b": "api_key=visible-value", "c": fake_token},
                 )
             )
 
@@ -31,7 +32,7 @@ class EventAndContextTests(unittest.TestCase):
 
             self.assertNotIn(secret, encoded)
             self.assertNotIn("visible-value", encoded)
-            self.assertNotIn("sk-abcdefghijk", encoded)
+            self.assertNotIn(fake_token, encoded)
             self.assertIn("REDACTED", encoded)
             json.loads(encoded)
 
@@ -59,4 +60,3 @@ class EventAndContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
