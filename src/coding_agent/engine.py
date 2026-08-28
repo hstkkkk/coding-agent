@@ -16,6 +16,7 @@ from .domain import (
     AgentError,
     AssistantTurn,
     BlockedRequest,
+    BudgetExhaustedError,
     Clock,
     ErrorCode,
     EventSink,
@@ -126,6 +127,14 @@ class AgentEngine:
                 "task objective must not be empty",
                 error_code=ErrorCode.MODEL_REQUEST,
             )
+        if len(state.objective) > 20_000:
+            return self._terminal(
+                state,
+                emitter,
+                RunStatus.FAILED,
+                "task objective exceeds the 20000-character limit",
+                error_code=ErrorCode.MODEL_REQUEST,
+            )
 
         baseline = self.tools.initial_workspace_state()
         state.initial_git_head = _optional_string(baseline.get("git_head"))
@@ -161,6 +170,14 @@ class AgentEngine:
 
                 try:
                     turn = self._request_model(state, emitter, started)
+                except BudgetExhaustedError as exc:
+                    return self._terminal(
+                        state,
+                        emitter,
+                        RunStatus.FAILED,
+                        str(exc),
+                        error_code=exc.code,
+                    )
                 except ModelAuthError as exc:
                     return self._terminal(
                         state,
@@ -264,7 +281,7 @@ class AgentEngine:
         for attempt in range(1, self.options.model_retry_attempts + 1):
             budget_failure = self._check_budget(state, started)
             if budget_failure:
-                raise ModelTransientError(budget_failure)
+                raise BudgetExhaustedError(budget_failure)
             state.model_turns += 1
             try:
                 return self.model.complete(request)

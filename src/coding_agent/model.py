@@ -148,6 +148,7 @@ class OpenAICompatibleAdapter(ModelPort):
         rationale = rationale_value.strip() if isinstance(rationale_value, str) else ""
 
         if name == "finish":
+            _reject_unknown_arguments(arguments, {"summary", "verification_ids", "warnings"})
             action = FinishRequest(
                 call_id=call_id,
                 summary=require_string(arguments.get("summary"), "finish summary"),
@@ -157,6 +158,7 @@ class OpenAICompatibleAdapter(ModelPort):
                 warnings=string_tuple(arguments.get("warnings"), "warnings"),
             )
         elif name == "report_blocked":
+            _reject_unknown_arguments(arguments, {"reason", "needed"})
             action = BlockedRequest(
                 call_id=call_id,
                 reason=require_string(arguments.get("reason"), "blocked reason"),
@@ -187,3 +189,9 @@ class ScriptedModelAdapter(ModelPort):
         if callable(response):
             return response(request)
         return response
+
+
+def _reject_unknown_arguments(arguments: dict[str, Any], allowed: set[str]) -> None:
+    unknown = sorted(set(arguments) - allowed)
+    if unknown:
+        raise ModelProtocolError(f"unknown control-action arguments: {', '.join(unknown)}")

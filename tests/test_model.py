@@ -109,7 +109,30 @@ class ModelAdapterTests(unittest.TestCase):
         with self.assertRaises(ModelProtocolError):
             adapter.complete(ModelRequest("system", "task", (READ_TOOL,)))
 
+    def test_rejects_unknown_finish_argument(self) -> None:
+        adapter = StubAdapter(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "function": {
+                                        "name": "finish",
+                                        "arguments": '{"summary":"done","verification_ids":[],"force":true}',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+
+        with self.assertRaises(ModelProtocolError):
+            adapter.complete(ModelRequest("system", "task", (FINISH_TOOL,)))
+
 
 if __name__ == "__main__":
     unittest.main()
-

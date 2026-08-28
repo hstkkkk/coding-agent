@@ -281,6 +281,11 @@ class ModelRequestError(AgentError):
         super().__init__(ErrorCode.MODEL_REQUEST, message)
 
 
+class BudgetExhaustedError(AgentError):
+    def __init__(self, message: str):
+        super().__init__(ErrorCode.BUDGET_EXHAUSTED, message)
+
+
 def action_name(action: Action) -> str:
     if isinstance(action, FinishRequest):
         return "finish"

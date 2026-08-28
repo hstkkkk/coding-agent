@@ -174,6 +174,16 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual(len(model.requests), 2)
         self.assertEqual(len(clock.sleeps), 1)
 
+    def test_retry_cannot_exceed_model_turn_budget(self) -> None:
+        clock = FakeClock()
+        result, _, _, _ = self.run_engine(
+            [ModelTransientError("temporary")],
+            options=RunOptions(max_model_turns=1),
+            clock=clock,
+        )
+        self.assertEqual(result.status, RunStatus.FAILED)
+        self.assertEqual(result.error_code, ErrorCode.BUDGET_EXHAUSTED)
+
     def test_identical_action_stagnation_stops_before_third_execution(self) -> None:
         same = AssistantTurn("inspect", ToolCall("same", "git_diff", {}))
         result, _, tools, _ = self.run_engine([same, same, same])
@@ -184,4 +194,3 @@ class AgentEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

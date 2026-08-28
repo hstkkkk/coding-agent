@@ -30,6 +30,7 @@ class ArtifactStore:
     ) -> None:
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._restrict_permissions(self.root, 0o700)
         self._redactor = redactor
         self._max_artifact_chars = max_artifact_chars
 
@@ -41,6 +42,7 @@ class ArtifactStore:
         output_id = uuid.uuid4().hex
         path = self._path(output_id)
         path.write_text(stored, encoding="utf-8", newline="\n")
+        self._restrict_permissions(path, 0o600)
         return ArtifactRef(output_id, len(stored), original_chars, truncated)
 
     def read_text(self, output_id: str, offset: int, limit: int) -> tuple[str, int]:
@@ -71,3 +73,9 @@ class ArtifactStore:
             raise ValueError("invalid output_id")
         return self.root / f"{output_id}.txt"
 
+    @staticmethod
+    def _restrict_permissions(path: Path, mode: int) -> None:
+        try:
+            path.chmod(mode)
+        except OSError:
+            pass

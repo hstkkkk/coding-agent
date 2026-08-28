@@ -62,6 +62,9 @@ class JsonlEventSink(EventSink):
     def __init__(self, path: Path, redactor: Redactor) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        _restrict_permissions(self.path.parent, 0o700)
+        self.path.touch(exist_ok=True)
+        _restrict_permissions(self.path, 0o600)
         self._redactor = redactor
         self._lock = threading.Lock()
 
@@ -146,3 +149,11 @@ class EventEmitter:
         )
         self._sink.emit(event)
         return event
+
+
+def _restrict_permissions(path: Path, mode: int) -> None:
+    try:
+        path.chmod(mode)
+    except OSError:
+        # Windows ACLs and some mounted filesystems do not implement POSIX modes.
+        pass

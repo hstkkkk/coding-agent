@@ -237,7 +237,7 @@ class LocalToolRuntime(ToolRuntime):
             f"{execution.stderr}"
         )
         artifact = self.artifacts.write_text(combined)
-        changed = before.status != after.status or before.head != after.head
+        changed = before.fingerprint != after.fingerprint or before.head != after.head
         if not before.available or not after.available:
             changed = True
         preview = _preview(self.redactor.text(combined), 8_000)

@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             return _inspect_run(args)
         if args.command == "eval":
             return _eval(args)
-    except ConfigurationError as exc:
+    except (ConfigurationError, OSError) as exc:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 5
     return 5
@@ -118,6 +118,7 @@ def _run(args: argparse.Namespace) -> int:
         raise ConfigurationError("workspace must be a Git repository")
     if not args.model:
         raise ConfigurationError("set --model or CODING_AGENT_MODEL")
+    _validate_base_url(args.base_url)
     if args.max_turns <= 0 or args.max_turns > 200:
         raise ConfigurationError("--max-turns must be between 1 and 200")
     if args.max_seconds <= 0 or args.max_seconds > 7_200:
@@ -213,6 +214,7 @@ def _inspect_run(args: argparse.Namespace) -> int:
 def _eval(args: argparse.Namespace) -> int:
     if not args.model:
         raise ConfigurationError("set --model or CODING_AGENT_MODEL")
+    _validate_base_url(args.base_url)
     api_key = os.environ.get(args.api_key_env)
     if not api_key:
         raise ConfigurationError(f"environment variable {args.api_key_env} is not set")
@@ -279,6 +281,12 @@ def _prompt_hash() -> str:
     import hashlib
 
     return hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()
+
+
+def _validate_base_url(value: str) -> None:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ConfigurationError("base URL must be an absolute HTTP(S) URL")
 
 
 if __name__ == "__main__":

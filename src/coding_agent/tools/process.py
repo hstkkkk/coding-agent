@@ -85,10 +85,10 @@ class ProcessRunner:
             except subprocess.TimeoutExpired:
                 timed_out = True
                 self._terminate_tree(process)
-                process.wait(timeout=5)
+                self._ensure_stopped(process)
             except KeyboardInterrupt:
                 self._terminate_tree(process)
-                process.wait(timeout=5)
+                self._ensure_stopped(process)
                 raise
 
             stdout, stdout_truncated = self._read_bounded(stdout_file)
@@ -140,3 +140,11 @@ class ProcessRunner:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+
+    @staticmethod
+    def _ensure_stopped(process: subprocess.Popen[bytes]) -> None:
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)

@@ -290,6 +290,8 @@ def _safe_relative(raw: str) -> str:
     path = Path(raw)
     if path.is_absolute() or path.drive or ".." in path.parts:
         raise ValueError("path must be relative and must not contain ..")
+    if ".git" in {part.lower() for part in path.parts}:
+        raise ValueError("direct .git paths are not allowed")
     return path.as_posix()
 
 
@@ -315,4 +317,3 @@ def _preview(text: str, limit: int) -> str:
         return text
     half = limit // 2
     return text[:half] + "\n...[oracle output truncated]...\n" + text[-half:]
-

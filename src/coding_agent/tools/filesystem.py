@@ -5,11 +5,12 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from ..policy import PathPolicy
+from ..policy import PathPolicy, PolicyViolation
 
 
 class ToolInputError(ValueError):
@@ -35,10 +36,14 @@ class FileTools:
         *,
         max_read_chars: int = 100_000,
         max_search_file_bytes: int = 1_000_000,
+        max_file_bytes: int = 5_000_000,
+        max_write_chars: int = 500_000,
     ) -> None:
         self.policy = policy
         self.max_read_chars = max_read_chars
         self.max_search_file_bytes = max_search_file_bytes
+        self.max_file_bytes = max_file_bytes
+        self.max_write_chars = max_write_chars
 
     def list_directory(
         self,
@@ -59,11 +64,17 @@ class FileTools:
             relative = item.relative_to(self.policy.workspace)
             if ".git" in relative.parts:
                 continue
+            try:
+                safe_item = self.policy.resolve(relative.as_posix())
+                item_type = "directory" if safe_item.is_dir() else "file"
+                size = safe_item.stat().st_size if safe_item.is_file() else None
+            except (OSError, PolicyViolation):
+                continue
             entries.append(
                 {
                     "path": relative.as_posix(),
-                    "type": "directory" if item.is_dir() else "file",
-                    "size": item.stat().st_size if item.is_file() else None,
+                    "type": item_type,
+                    "size": size,
                 }
             )
             if len(entries) >= max_entries:
@@ -81,6 +92,7 @@ class FileTools:
         target = self.policy.resolve(path)
         if not target.is_file():
             raise ToolInputError("path is not a file")
+        self._ensure_bounded_file(target)
         if start_line < 1:
             raise ToolInputError("start_line must be at least 1")
         if end_line is not None and end_line < start_line:
@@ -117,6 +129,8 @@ class FileTools:
     ) -> dict[str, Any]:
         if not query:
             raise ToolInputError("query must not be empty")
+        if len(query) > 2_000:
+            raise ToolInputError("query is too long")
         if max_results <= 0 or max_results > 500:
             raise ToolInputError("max_results must be between 1 and 500")
         target = self.policy.resolve(path)
@@ -130,9 +144,10 @@ class FileTools:
             if ".git" in relative.parts or not fnmatch.fnmatch(relative.name, glob):
                 continue
             try:
-                if file_path.stat().st_size > self.max_search_file_bytes:
+                safe_file = self.policy.resolve(relative.as_posix())
+                if not safe_file.is_file() or safe_file.stat().st_size > self.max_search_file_bytes:
                     continue
-                with file_path.open("r", encoding="utf-8", errors="strict") as handle:
+                with safe_file.open("r", encoding="utf-8", errors="strict") as handle:
                     for line_number, line in enumerate(handle, start=1):
                         column = line.find(query)
                         if column >= 0:
@@ -146,7 +161,7 @@ class FileTools:
                             )
                             if len(results) >= max_results:
                                 return {"matches": results, "truncated": True}
-            except (UnicodeDecodeError, OSError):
+            except (UnicodeDecodeError, OSError, PolicyViolation):
                 continue
         return {"matches": results, "truncated": False}
 
@@ -160,9 +175,12 @@ class FileTools:
     ) -> dict[str, Any]:
         if not old_text:
             raise ToolInputError("old_text must not be empty")
+        if len(old_text) > self.max_write_chars or len(new_text) > self.max_write_chars:
+            raise ToolInputError("edit text exceeds the configured size limit")
         target = self.policy.resolve(path, write=True)
         if not target.is_file():
             raise ToolInputError("path is not a file")
+        self._ensure_bounded_file(target)
         actual_hash = file_sha256(target)
         if actual_hash != expected_sha256:
             raise EditConflict(f"file hash changed; current sha256 is {actual_hash}")
@@ -182,16 +200,24 @@ class FileTools:
         }
 
     def create_file(self, *, path: str, content: str) -> dict[str, Any]:
+        if len(content) > self.max_write_chars:
+            raise ToolInputError("new file content exceeds the configured size limit")
         target = self.policy.resolve(path, write=True)
         if target.exists():
             raise EditConflict("target already exists")
         target.parent.mkdir(parents=True, exist_ok=True)
+        created = False
         try:
             descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            created = True
             with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
                 handle.write(content)
         except FileExistsError as exc:
             raise EditConflict("target already exists") from exc
+        except Exception:
+            if created:
+                target.unlink(missing_ok=True)
+            raise
         relative = target.relative_to(self.policy.workspace).as_posix()
         return {
             "path": relative,
@@ -204,6 +230,7 @@ class FileTools:
         target = self.policy.resolve(path, write=True)
         if not target.is_file():
             raise ToolInputError("path is not a file")
+        self._ensure_bounded_file(target)
         actual_hash = file_sha256(target)
         if actual_hash != expected_sha256:
             raise EditConflict(f"file hash changed; current sha256 is {actual_hash}")
@@ -218,7 +245,7 @@ class FileTools:
 
     @staticmethod
     def _atomic_replace(target: Path, text: str) -> None:
-        mode = target.stat().st_mode
+        mode = stat.S_IMODE(target.stat().st_mode)
         descriptor, temporary_name = tempfile.mkstemp(prefix=".agent-edit-", dir=target.parent)
         temporary = Path(temporary_name)
         try:
@@ -231,3 +258,6 @@ class FileTools:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def _ensure_bounded_file(self, target: Path) -> None:
+        if target.stat().st_size > self.max_file_bytes:
+            raise ToolInputError("file exceeds the configured size limit")

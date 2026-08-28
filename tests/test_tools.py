@@ -125,7 +125,37 @@ class LocalToolRuntimeTests(unittest.TestCase):
         self.assertEqual(result.error_code, ErrorCode.POLICY_DENIED)
         self.assertEqual(len(self.approvals.requests), 0)
 
+    def test_search_does_not_follow_file_symlink_outside_workspace(self) -> None:
+        outside = Path(self.temporary.name) / "outside.txt"
+        outside.write_text("outside-secret-marker", encoding="utf-8")
+        link = self.workspace / "linked.txt"
+        try:
+            link.symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f"symbolic links unavailable: {exc}")
+
+        result = self.execute("search_text", {"query": "outside-secret-marker"})
+
+        self.assertEqual(result.status, ToolStatus.COMPLETED)
+        self.assertEqual(result.data["matches"], [])
+
+    def test_command_detects_change_to_an_already_dirty_file(self) -> None:
+        (self.workspace / "sample.txt").write_text("already dirty\n", encoding="utf-8")
+        result = self.execute(
+            "run_command",
+            {
+                "program": "python",
+                "args": [
+                    "-c",
+                    "from pathlib import Path; Path('sample.txt').write_text('changed again\\n')",
+                ],
+                "purpose": "operate",
+            },
+        )
+
+        self.assertEqual(result.status, ToolStatus.COMPLETED)
+        self.assertTrue(result.data["workspace_changed"])
+
 
 if __name__ == "__main__":
     unittest.main()
-
