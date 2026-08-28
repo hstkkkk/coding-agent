@@ -26,6 +26,7 @@ from .events import (
 from .model import OpenAICompatibleAdapter
 from .policy import DenyApprovalAdapter, PromptApprovalAdapter, ScopedApprovalAdapter
 from .tools import LocalToolRuntime
+from .evaluation import EvaluationConfig, load_suite, run_evaluation
 
 
 EXIT_CODES = {
@@ -77,6 +78,19 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser = subparsers.add_parser("inspect-run", help="show a saved run log")
     inspect_parser.add_argument("run_id")
     inspect_parser.add_argument("--json", action="store_true")
+
+    eval_parser = subparsers.add_parser("eval", help="run a repeatable local evaluation suite")
+    eval_parser.add_argument("--suite", type=Path, required=True)
+    eval_parser.add_argument("--model", default=os.environ.get("CODING_AGENT_MODEL"))
+    eval_parser.add_argument(
+        "--base-url",
+        default=os.environ.get("CODING_AGENT_BASE_URL", "https://api.openai.com/v1"),
+    )
+    eval_parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    eval_parser.add_argument("--repetitions", type=int)
+    eval_parser.add_argument("--max-turns", type=int, default=30)
+    eval_parser.add_argument("--max-seconds", type=int, default=900)
+    eval_parser.add_argument("--command-timeout", type=int, default=120)
     return parser
 
 
@@ -88,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run(args)
         if args.command == "inspect-run":
             return _inspect_run(args)
+        if args.command == "eval":
+            return _eval(args)
     except ConfigurationError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 5
@@ -192,6 +208,64 @@ def _inspect_run(args: argparse.Namespace) -> int:
         elif kind == "terminal":
             print(f"{event['sequence']:>3} DONE  {data.get('status', '')}: {data.get('summary', '')}")
     return 0
+
+
+def _eval(args: argparse.Namespace) -> int:
+    if not args.model:
+        raise ConfigurationError("set --model or CODING_AGENT_MODEL")
+    api_key = os.environ.get(args.api_key_env)
+    if not api_key:
+        raise ConfigurationError(f"environment variable {args.api_key_env} is not set")
+    if not 1 <= args.max_turns <= 200:
+        raise ConfigurationError("--max-turns must be between 1 and 200")
+    if not 1 <= args.max_seconds <= 7_200:
+        raise ConfigurationError("--max-seconds must be between 1 and 7200")
+    if not 1 <= args.command_timeout <= 600:
+        raise ConfigurationError("--command-timeout must be between 1 and 600")
+    if args.repetitions is not None and not 1 <= args.repetitions <= 5:
+        raise ConfigurationError("--repetitions must be between 1 and 5")
+    try:
+        suite = load_suite(args.suite)
+    except (OSError, ValueError) as exc:
+        raise ConfigurationError(str(exc)) from exc
+
+    redactor = Redactor([api_key])
+    options = RunOptions(
+        max_model_turns=args.max_turns,
+        max_wall_seconds=args.max_seconds,
+        default_command_timeout=args.command_timeout,
+    )
+    model = OpenAICompatibleAdapter(
+        api_key=api_key,
+        model=args.model,
+        base_url=args.base_url,
+    )
+    endpoint = urlparse(args.base_url)
+    _, report = run_evaluation(
+        suite,
+        EvaluationConfig(
+            model=model,
+            options=options,
+            runs_root=_runs_root(),
+            redactor=redactor,
+            metadata={
+                "agent_version": __version__,
+                "prompt_sha256": _prompt_hash(),
+                "tool_schema_version": "1",
+                "model_name": args.model,
+                "endpoint_host": endpoint.hostname or "",
+                "platform": platform.system(),
+                "python_version": platform.python_version(),
+            },
+        ),
+        repetitions=args.repetitions,
+    )
+    print(
+        f"Evaluation {report['evaluation_id']}: "
+        f"{report['passed']}/{report['runs']} passed, "
+        f"false successes={report['false_successes']}"
+    )
+    return 0 if report["passed"] == report["runs"] else 3
 
 
 def _runs_root() -> Path:

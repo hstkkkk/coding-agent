@@ -209,6 +209,9 @@ class RunResult:
     warnings: tuple[str, ...] = ()
     blocked_reason: str | None = None
     error_code: ErrorCode | None = None
+    model_turns: int = 0
+    tool_calls: int = 0
+    workspace_version: int = 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,24 @@
+{
+  "repetitions": 1,
+  "allowed_programs": ["python"],
+  "tasks": [
+    {
+      "name": "merge-touching-intervals",
+      "source": "fixtures/intervals",
+      "objective": "Fix merge_intervals so intervals that touch at an endpoint are merged. Preserve behavior for disjoint and overlapping intervals, and run the relevant tests.",
+      "oracle": {
+        "program": "python",
+        "args": ["-m", "unittest", "discover", "-v"],
+        "cwd": ".",
+        "timeout_seconds": 60
+      },
+      "hidden_files": [
+        {
+          "source": "hidden/test_intervals_hidden.py",
+          "destination": "test_intervals_hidden.py"
+        }
+      ]
+    }
+  ]
+}
+

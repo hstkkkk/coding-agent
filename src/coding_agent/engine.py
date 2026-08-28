@@ -492,6 +492,9 @@ class AgentEngine:
             warnings=warnings,
             blocked_reason=blocked_reason,
             error_code=error_code,
+            model_turns=state.model_turns,
+            tool_calls=state.tool_calls,
+            workspace_version=state.workspace_version,
         )
 
 
