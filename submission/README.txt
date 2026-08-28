@@ -1,6 +1,6 @@
 项目名称：Bounded Coding Agent
 
-仓库地址：<提交前填写匿名公开仓库地址>
+仓库地址：https://github.com/hstkkkk/coding-agent
 
 运行环境：Python 3.11+、Git，以及支持原生 tool calling 的 OpenAI-compatible 模型接口。安装命令为 `python -m pip install -e .`。设置 `OPENAI_API_KEY`、`CODING_AGENT_MODEL` 后，运行：`coding-agent run --workspace <Git仓库路径> "<编程任务>"`。默认情况下，命令执行与文件删除需要人工确认。离线测试：`python -m unittest discover -s tests -v`。
 
