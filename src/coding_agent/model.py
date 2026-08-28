@@ -7,6 +7,7 @@ import socket
 import urllib.error
 import urllib.request
 from collections import deque
+from collections.abc import Callable
 from typing import Any, Iterable
 
 from .domain import (
@@ -166,10 +167,13 @@ class OpenAICompatibleAdapter(ModelPort):
         return AssistantTurn(rationale=rationale, action=action)
 
 
+ScriptedResponse = AssistantTurn | Exception | Callable[[ModelRequest], AssistantTurn]
+
+
 class ScriptedModelAdapter(ModelPort):
     """Deterministic model adapter for AgentEngine scenario tests."""
 
-    def __init__(self, responses: Iterable[AssistantTurn | Exception]) -> None:
+    def __init__(self, responses: Iterable[ScriptedResponse]) -> None:
         self._responses = deque(responses)
         self.requests: list[ModelRequest] = []
 
@@ -180,5 +184,6 @@ class ScriptedModelAdapter(ModelPort):
         response = self._responses.popleft()
         if isinstance(response, Exception):
             raise response
+        if callable(response):
+            return response(request)
         return response
-

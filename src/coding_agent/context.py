@@ -102,6 +102,7 @@ class ContextManager:
     def _step_block(step: object) -> str:
         payload = {
             "step": getattr(step, "step"),
+            "workspace_version": getattr(step, "workspace_version"),
             "rationale": getattr(step, "rationale"),
             "action": getattr(step, "action_name"),
             "arguments": getattr(step, "arguments"),
@@ -111,4 +112,3 @@ class ContextManager:
         if len(encoded) <= 8_000:
             return encoded
         return encoded[:4_000] + "\n...[step truncated]...\n" + encoded[-4_000:]
-

@@ -152,6 +152,7 @@ class VerificationRecord:
 @dataclass(frozen=True, slots=True)
 class StepRecord:
     step: int
+    workspace_version: int
     rationale: str
     action_name: str
     arguments: JsonObject
@@ -315,4 +316,3 @@ def string_tuple(value: Any, label: str) -> tuple[str, ...]:
     if not all(isinstance(item, str) for item in value):
         raise ModelProtocolError(f"{label} must contain only strings")
     return tuple(value)
-
