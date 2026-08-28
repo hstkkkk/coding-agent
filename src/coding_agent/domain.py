@@ -131,6 +131,7 @@ class ApprovalRequest:
     risk: RiskLevel
     summary: str
     operation_digest: str
+    arguments: JsonObject = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +184,7 @@ class RunState:
 class TaskRequest:
     objective: str
     workspace: Path
+    run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

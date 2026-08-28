@@ -112,6 +112,7 @@ class LocalToolRuntime(ToolRuntime):
                         definition.risk,
                         summary,
                         digest,
+                        dict(call.arguments),
                     )
                 )
                 if not decision.approved:

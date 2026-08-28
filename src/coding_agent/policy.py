@@ -108,5 +108,26 @@ class PromptApprovalAdapter(ApprovalPort):
         return ApprovalDecision(False, "declined interactively")
 
 
+class ScopedApprovalAdapter(ApprovalPort):
+    """Pre-approve execution only for explicitly named executables."""
+
+    def __init__(self, fallback: ApprovalPort, allowed_programs: set[str]) -> None:
+        self._fallback = fallback
+        self._allowed_programs = {item.lower() for item in allowed_programs}
+
+    def request(self, request: ApprovalRequest) -> ApprovalDecision:
+        program = request.arguments.get("program")
+        if (
+            request.tool_name == "run_command"
+            and isinstance(program, str)
+            and program.lower() in self._allowed_programs
+        ):
+            return ApprovalDecision(
+                True,
+                f"program {program} was explicitly pre-authorized at startup",
+            )
+        return self._fallback.request(request)
+
+
 def needs_approval(risk: RiskLevel) -> bool:
     return risk in {RiskLevel.DELETE, RiskLevel.EXECUTION}

@@ -99,6 +99,7 @@ class AgentEngine:
         events: EventSink,
         options: RunOptions | None = None,
         clock: Clock | None = None,
+        run_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -106,9 +107,10 @@ class AgentEngine:
         self.clock = clock or SystemClock()
         self.context = ContextManager(self.options)
         self.events = events
+        self.run_metadata = dict(run_metadata or {})
 
     def run(self, request: TaskRequest) -> RunResult:
-        run_id = uuid.uuid4().hex
+        run_id = request.run_id or uuid.uuid4().hex
         emitter = EventEmitter(run_id, self.events)
         state = RunState(
             run_id=run_id,
@@ -133,6 +135,7 @@ class AgentEngine:
             objective=state.objective,
             initial_git_head=state.initial_git_head,
             initially_dirty=bool(state.initial_git_status),
+            metadata=self.run_metadata,
         )
         if not baseline.get("git_available"):
             return self._terminal(
@@ -494,4 +497,3 @@ class AgentEngine:
 
 def _optional_string(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
-

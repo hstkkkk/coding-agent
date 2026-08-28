@@ -84,8 +84,13 @@ class InMemoryEventSink(EventSink):
 class ConsoleEventSink(EventSink):
     """Render only concise, non-sensitive progress information."""
 
+    def __init__(self, redactor: Redactor | None = None) -> None:
+        self._redactor = redactor or Redactor()
+
     def emit(self, event: RunEvent) -> None:
-        data = event.data
+        sanitized = self._redactor.value(event.data)
+        assert isinstance(sanitized, dict)
+        data = sanitized
         if event.kind == "model_action":
             print(f"[MODEL] {data.get('action', 'unknown')}: {data.get('rationale', '')}")
         elif event.kind == "tool_finished":
@@ -99,6 +104,20 @@ class ConsoleEventSink(EventSink):
             print(f"[DONE] {data.get('status', 'UNKNOWN')}: {data.get('summary', '')}")
         elif event.kind in {"retry", "warning"}:
             print(f"[{event.kind.upper()}] {data.get('message', '')}")
+
+
+class JsonConsoleEventSink(EventSink):
+    def __init__(self, redactor: Redactor) -> None:
+        self._redactor = redactor
+
+    def emit(self, event: RunEvent) -> None:
+        print(
+            json.dumps(
+                self._redactor.value(event),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
 
 
 class CompositeEventSink(EventSink):
@@ -127,4 +146,3 @@ class EventEmitter:
         )
         self._sink.emit(event)
         return event
-

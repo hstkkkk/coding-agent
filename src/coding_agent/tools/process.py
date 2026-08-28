@@ -57,6 +57,7 @@ class ProcessRunner:
             if key.upper() in self._ENV_ALLOWLIST
         }
         environment["PYTHONIOENCODING"] = "utf-8"
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
 
         creationflags = 0
         popen_options: dict[str, object] = {}
@@ -139,4 +140,3 @@ class ProcessRunner:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-
