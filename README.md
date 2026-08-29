@@ -62,6 +62,8 @@ $env:OPENAI_API_KEY = "..."
 $env:CODING_AGENT_MODEL = "..."
 # Optional for a compatible gateway:
 $env:CODING_AGENT_BASE_URL = "https://example.invalid/v1"
+# Optional when a provider defaults to a thinking mode that rejects forced tools:
+$env:CODING_AGENT_THINKING = "disabled"
 ```
 
 Bash:
@@ -69,7 +71,12 @@ Bash:
 ```bash
 export OPENAI_API_KEY="..."
 export CODING_AGENT_MODEL="..."
+export CODING_AGENT_THINKING="disabled"
 ```
+
+`CODING_AGENT_THINKING` accepts `enabled` or `disabled`. Leave it unset to
+preserve the provider default. The equivalent command-line option is
+`--thinking enabled|disabled`.
 
 ## Run
 

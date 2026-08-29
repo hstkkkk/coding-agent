@@ -8,10 +8,22 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
-from coding_agent.cli import main
+from coding_agent.cli import build_parser, main
 
 
 class CliTests(unittest.TestCase):
+    def test_parser_reads_explicit_thinking_mode_from_environment(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"CODING_AGENT_THINKING": "disabled"},
+            clear=True,
+        ):
+            args = build_parser().parse_args(
+                ["eval", "--suite", "evaluation/suite.json"]
+            )
+
+        self.assertEqual(args.thinking, "disabled")
+
     def test_configuration_fails_before_model_call(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

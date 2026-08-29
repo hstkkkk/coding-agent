@@ -57,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("CODING_AGENT_BASE_URL", "https://api.openai.com/v1"),
     )
     run_parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    run_parser.add_argument(
+        "--thinking",
+        choices=("enabled", "disabled"),
+        default=os.environ.get("CODING_AGENT_THINKING"),
+        help="explicit provider thinking mode; omitted uses the provider default",
+    )
     run_parser.add_argument("--max-turns", type=int, default=30)
     run_parser.add_argument("--max-seconds", type=int, default=900)
     run_parser.add_argument("--command-timeout", type=int, default=120)
@@ -87,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("CODING_AGENT_BASE_URL", "https://api.openai.com/v1"),
     )
     eval_parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    eval_parser.add_argument(
+        "--thinking",
+        choices=("enabled", "disabled"),
+        default=os.environ.get("CODING_AGENT_THINKING"),
+        help="explicit provider thinking mode; omitted uses the provider default",
+    )
     eval_parser.add_argument("--repetitions", type=int)
     eval_parser.add_argument("--max-turns", type=int, default=30)
     eval_parser.add_argument("--max-seconds", type=int, default=900)
@@ -119,6 +131,7 @@ def _run(args: argparse.Namespace) -> int:
     if not args.model:
         raise ConfigurationError("set --model or CODING_AGENT_MODEL")
     _validate_base_url(args.base_url)
+    _validate_thinking(args.thinking)
     if args.max_turns <= 0 or args.max_turns > 200:
         raise ConfigurationError("--max-turns must be between 1 and 200")
     if args.max_seconds <= 0 or args.max_seconds > 7_200:
@@ -150,6 +163,7 @@ def _run(args: argparse.Namespace) -> int:
         api_key=api_key,
         model=args.model,
         base_url=args.base_url,
+        thinking=args.thinking,
     )
     tools = LocalToolRuntime(
         workspace=workspace,
@@ -169,6 +183,7 @@ def _run(args: argparse.Namespace) -> int:
             "prompt_sha256": _prompt_hash(),
             "tool_schema_version": "1",
             "model_name": args.model,
+            "thinking_mode": args.thinking or "provider_default",
             "endpoint_host": parsed_endpoint.hostname or "",
             "platform": platform.system(),
             "python_version": platform.python_version(),
@@ -215,6 +230,7 @@ def _eval(args: argparse.Namespace) -> int:
     if not args.model:
         raise ConfigurationError("set --model or CODING_AGENT_MODEL")
     _validate_base_url(args.base_url)
+    _validate_thinking(args.thinking)
     api_key = os.environ.get(args.api_key_env)
     if not api_key:
         raise ConfigurationError(f"environment variable {args.api_key_env} is not set")
@@ -241,6 +257,7 @@ def _eval(args: argparse.Namespace) -> int:
         api_key=api_key,
         model=args.model,
         base_url=args.base_url,
+        thinking=args.thinking,
     )
     endpoint = urlparse(args.base_url)
     _, report = run_evaluation(
@@ -255,6 +272,7 @@ def _eval(args: argparse.Namespace) -> int:
                 "prompt_sha256": _prompt_hash(),
                 "tool_schema_version": "1",
                 "model_name": args.model,
+                "thinking_mode": args.thinking or "provider_default",
                 "endpoint_host": endpoint.hostname or "",
                 "platform": platform.system(),
                 "python_version": platform.python_version(),
@@ -287,6 +305,11 @@ def _validate_base_url(value: str) -> None:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ConfigurationError("base URL must be an absolute HTTP(S) URL")
+
+
+def _validate_thinking(value: str | None) -> None:
+    if value not in {None, "enabled", "disabled"}:
+        raise ConfigurationError("thinking mode must be enabled or disabled")
 
 
 if __name__ == "__main__":

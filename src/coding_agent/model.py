@@ -39,16 +39,20 @@ class OpenAICompatibleAdapter(ModelPort):
         base_url: str = "https://api.openai.com/v1",
         timeout_seconds: int = 60,
         temperature: float = 0.0,
+        thinking: str | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("api_key must not be empty")
         if not model:
             raise ValueError("model must not be empty")
+        if thinking not in {None, "enabled", "disabled"}:
+            raise ValueError("thinking must be enabled, disabled, or None")
         self._api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.temperature = temperature
+        self.thinking = thinking
 
     def complete(self, request: ModelRequest) -> AssistantTurn:
         payload = {
@@ -61,6 +65,8 @@ class OpenAICompatibleAdapter(ModelPort):
             "tool_choice": "required",
             "temperature": self.temperature,
         }
+        if self.thinking is not None:
+            payload["thinking"] = {"type": self.thinking}
         raw = self._post(payload)
         try:
             choices = raw["choices"]

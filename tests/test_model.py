@@ -32,8 +32,17 @@ FINISH_TOOL = ToolDefinition(
 
 
 class StubAdapter(OpenAICompatibleAdapter):
-    def __init__(self, response: dict[str, object]) -> None:
-        super().__init__(api_key="unit-test-secret", model="test-model")
+    def __init__(
+        self,
+        response: dict[str, object],
+        *,
+        thinking: str | None = None,
+    ) -> None:
+        super().__init__(
+            api_key="unit-test-secret",
+            model="test-model",
+            thinking=thinking,
+        )
         self.response = response
         self.last_payload: dict[str, object] | None = None
 
@@ -43,6 +52,33 @@ class StubAdapter(OpenAICompatibleAdapter):
 
 
 class ModelAdapterTests(unittest.TestCase):
+    def test_includes_explicit_thinking_mode_in_request_payload(self) -> None:
+        adapter = StubAdapter(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "function": {
+                                        "name": "read_file",
+                                        "arguments": '{"path":"x.py"}',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            thinking="disabled",
+        )
+
+        adapter.complete(ModelRequest("system", "task", (READ_TOOL,)))
+
+        assert adapter.last_payload is not None
+        self.assertEqual(adapter.last_payload["thinking"], {"type": "disabled"})
+
     def test_normalizes_finish_control_action(self) -> None:
         adapter = StubAdapter(
             {
