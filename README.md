@@ -42,10 +42,22 @@ the cited successful verification belongs to the current workspace version.
 
 ## Install
 
+For development in this checkout:
+
 ```bash
 python -m venv .venv
 python -m pip install -e .
 ```
+
+To make `coding-agent` available from arbitrary target directories with `uv`,
+install the console command once:
+
+```powershell
+uv tool install --editable "C:/path/to/coding-agent"
+uv tool update-shell
+```
+
+Open a new terminal if `uv` reports that it changed `PATH`.
 
 No runtime dependency other than Python's standard library is installed.
 
@@ -78,7 +90,38 @@ export CODING_AGENT_THINKING="disabled"
 preserve the provider default. The equivalent command-line option is
 `--thinking enabled|disabled`.
 
-## Run
+## Interactive terminal
+
+After configuring the model environment, enter a target project and run the
+bare command:
+
+```powershell
+Set-Location "C:/path/to/target-project"
+coding-agent
+```
+
+This opens a line-oriented terminal session. Each natural-language submission
+creates a fresh bounded run with its own ID, budgets, event log, artifacts, and
+verification evidence. The working tree and a compact summary of up to six
+recent requests provide continuity for follow-up tasks.
+
+Session commands:
+
+```text
+/help       show commands
+/workspace  show the active repository root
+/history    show recent tasks, statuses, and run IDs
+/clear      clear an ANSI-capable terminal
+/exit       end the session
+```
+
+Use the explicit subcommand when passing startup options:
+
+```powershell
+coding-agent tui --allow-program python --max-turns 40
+```
+
+## One-shot run
 
 ```bash
 coding-agent run \
@@ -114,7 +157,8 @@ Useful options:
 --max-turns N
 --max-seconds N
 --command-timeout N
---json
+--allow-program NAME
+--json                    one-shot run only
 ```
 
 Run logs and redacted output artifacts are stored under

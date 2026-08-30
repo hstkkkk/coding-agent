@@ -4,7 +4,9 @@
 
 - Show the neutral target repository window.
 - Run the existing unit test and show the deterministic failure.
-- State the task in one sentence.
+- Run bare `coding-agent` to enter the terminal session.
+- If demonstrating first-run setup, show the generated ignore rules and initial
+  commit without exposing local paths or identity.
 
 ## 15–30 seconds: architecture
 
@@ -18,7 +20,7 @@ CLI -> AgentEngine <-> Model
 
 ## 30–85 seconds: real loop
 
-- Start one agent run.
+- Submit the task at the `coding-agent>` prompt.
 - Show concise events: read, search, hash-guarded edit, verification command.
 - Accelerate waiting time without hiding inputs or results.
 

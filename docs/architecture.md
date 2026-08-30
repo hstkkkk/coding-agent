@@ -17,6 +17,16 @@ tasks, or multi-agent coordination.
 implementation owns the loop, state transitions, retry budget, context view,
 stagnation detection, verification freshness, and terminal state.
 
+`LocalAgentRunner.run(objective) -> RunResult` is the local application
+interface used by both one-shot and interactive commands. Its implementation
+creates a new run ID, events, artifacts, tools, and `AgentEngine` for every
+call, so interactive turns never share controller state or verification.
+
+`InteractiveSession.run(run_task) -> int` owns the terminal grammar, slash
+commands, presentation, and bounded history. It supplies recent outcomes only
+as labeled context; the repository remains authoritative and every request
+crosses the same `LocalAgentRunner` interface.
+
 Internal seams have at least production and test adapters:
 
 | Seam | Production adapter | Test adapter |
@@ -26,6 +36,7 @@ Internal seams have at least production and test adapters:
 | Approval | terminal prompt/scoped policy | fixed decision |
 | Events | JSONL/console | in-memory sink |
 | Clock | system clock | virtual clock |
+| Terminal | stdio with optional ANSI styling | injected text streams |
 
 Vendor responses, subprocess objects, and CLI rendering do not enter the core
 data model.
@@ -145,6 +156,9 @@ Oracle is counted explicitly as a false success.
 - no checkpoint/resume after a crash;
 - no automatic network isolation for approved subprocesses;
 - no parallel tools or multi-agent coordination;
+- line-oriented terminal UI rather than a full-screen editor;
+- interactive history is in-memory and is not resumed after process exit;
+- no token-by-token model streaming;
 - UTF-8 text editing only;
 - optimized for small repositories and bounded tasks;
 - heuristic secret detection can have false negatives;

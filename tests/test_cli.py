@@ -13,6 +13,19 @@ from coding_agent.domain import RunResult, RunStatus
 
 
 class CliTests(unittest.TestCase):
+    def test_bare_command_dispatches_to_tui(self) -> None:
+        with patch("coding_agent.cli._tui", return_value=0) as tui:
+            exit_code = main([])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(tui.call_count, 1)
+
+    def test_parser_exposes_explicit_tui_command(self) -> None:
+        args = build_parser().parse_args(["tui"])
+
+        self.assertEqual(args.command, "tui")
+        self.assertEqual(args.workspace, Path.cwd())
+
     def test_parser_reads_explicit_thinking_mode_from_environment(self) -> None:
         with patch.dict(
             "os.environ",
@@ -72,7 +85,7 @@ class CliTests(unittest.TestCase):
             with (
                 patch.dict("os.environ", environment),
                 patch("coding_agent.cli._runs_root", return_value=Path(runs)),
-                patch("coding_agent.cli.AgentEngine.run", return_value=expected) as run,
+                patch("coding_agent.cli.LocalAgentRunner.run", return_value=expected) as run,
                 redirect_stdout(stdout),
             ):
                 exit_code = main(["run", "fix it", "--workspace", str(workspace)])
