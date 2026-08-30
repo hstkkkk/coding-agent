@@ -27,6 +27,7 @@ from .model import OpenAICompatibleAdapter
 from .policy import DenyApprovalAdapter, PromptApprovalAdapter, ScopedApprovalAdapter
 from .tools import LocalToolRuntime
 from .evaluation import EvaluationConfig, load_suite, run_evaluation
+from .workspace import WorkspaceSetupError, WorkspaceSetupResult, prepare_workspace
 
 
 EXIT_CODES = {
@@ -123,25 +124,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    workspace = args.workspace.resolve()
-    if not workspace.is_dir():
-        raise ConfigurationError("workspace does not exist or is not a directory")
-    if not (workspace / ".git").exists():
-        raise ConfigurationError("workspace must be a Git repository")
-    if not args.model:
-        raise ConfigurationError("set --model or CODING_AGENT_MODEL")
-    _validate_base_url(args.base_url)
-    _validate_thinking(args.thinking)
-    if args.max_turns <= 0 or args.max_turns > 200:
-        raise ConfigurationError("--max-turns must be between 1 and 200")
-    if args.max_seconds <= 0 or args.max_seconds > 7_200:
-        raise ConfigurationError("--max-seconds must be between 1 and 7200")
-    if args.command_timeout <= 0 or args.command_timeout > 600:
-        raise ConfigurationError("--command-timeout must be between 1 and 600")
-
-    api_key = os.environ.get(args.api_key_env)
-    if not api_key:
-        raise ConfigurationError(f"environment variable {args.api_key_env} is not set")
+    api_key = _validate_agent_configuration(args)
+    try:
+        setup = prepare_workspace(args.workspace)
+    except WorkspaceSetupError as exc:
+        raise ConfigurationError(str(exc)) from exc
+    _render_workspace_setup(setup, json_output=args.json)
+    workspace = setup.workspace
 
     run_id = uuid.uuid4().hex
     run_dir = _runs_root() / run_id
@@ -195,6 +184,42 @@ def _run(args: argparse.Namespace) -> int:
     if not args.json:
         print(f"Run ID: {result.run_id}")
     return EXIT_CODES[result.status]
+
+
+def _validate_agent_configuration(args: argparse.Namespace) -> str:
+    if not args.model:
+        raise ConfigurationError("set --model or CODING_AGENT_MODEL")
+    _validate_base_url(args.base_url)
+    _validate_thinking(args.thinking)
+    if args.max_turns <= 0 or args.max_turns > 200:
+        raise ConfigurationError("--max-turns must be between 1 and 200")
+    if args.max_seconds <= 0 or args.max_seconds > 7_200:
+        raise ConfigurationError("--max-seconds must be between 1 and 7200")
+    if args.command_timeout <= 0 or args.command_timeout > 600:
+        raise ConfigurationError("--command-timeout must be between 1 and 600")
+
+    api_key = os.environ.get(args.api_key_env)
+    if not api_key:
+        raise ConfigurationError(f"environment variable {args.api_key_env} is not set")
+    return api_key
+
+
+def _render_workspace_setup(
+    result: WorkspaceSetupResult,
+    *,
+    json_output: bool,
+) -> None:
+    for message in result.messages:
+        if json_output:
+            print(
+                json.dumps(
+                    {"kind": "workspace_setup", "message": message},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"[SETUP] {message}")
 
 
 def _inspect_run(args: argparse.Namespace) -> int:

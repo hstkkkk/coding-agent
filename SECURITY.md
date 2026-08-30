@@ -16,7 +16,14 @@ permissions.
 - bounded model turns, process time, file reads, search results, and outputs;
 - best-effort secret redaction before content reaches logs or model context;
 - read-only Git tools and rejection of common Git history/write operations;
+- trusted pre-run Git initialization with credential-protecting ignore rules
+  and a filtered subprocess environment;
 - process-tree termination on timeout or cancellation.
+
+Automatic `git init` and the initial baseline commit occur only in the trusted
+CLI startup path after configuration preflight. Existing repositories are not
+committed, cleaned, or rewritten. These Git writes are never available to the
+model as tools.
 
 ## Non-goals
 

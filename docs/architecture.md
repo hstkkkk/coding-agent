@@ -2,10 +2,10 @@
 
 ## System contract
 
-Given a natural-language task and one local Git repository, the system may
-inspect files, make bounded edits, run approved commands, and iterate on real
-tool results. It returns either verified changes or an explicit blocked,
-failed, or cancelled status.
+Given a natural-language task and one local workspace, the trusted CLI prepares
+a Git baseline when necessary. The agent may then inspect files, make bounded
+edits, run approved commands, and iterate on real tool results. It returns
+either verified changes or an explicit blocked, failed, or cancelled status.
 
 The first release targets small bug fixes and small feature additions. It does
 not target multi-repository work, deployment, GUI automation, long-running
@@ -29,6 +29,19 @@ Internal seams have at least production and test adapters:
 
 Vendor responses, subprocess objects, and CLI rendering do not enter the core
 data model.
+
+## Workspace startup
+
+Before constructing `AgentEngine`, the CLI validates model configuration and
+calls `prepare_workspace(path)`. Existing Git roots are strict no-ops. A
+non-Git directory is initialized with credential-protecting and project-aware
+ignore rules, then all non-ignored files are captured in an initial commit.
+Directories nested inside an enclosing repository are rejected instead of
+silently expanding the workspace or creating a nested repository.
+
+This startup path is trusted, human-requested orchestration. It uses bounded,
+shell-free Git subprocesses with a filtered environment. It is not exposed as a
+model tool; Git operations inside the Agent Loop remain read-only.
 
 ## Controller loop
 

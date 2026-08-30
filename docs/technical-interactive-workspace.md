@@ -89,10 +89,12 @@ The implementation owns one ordered pattern list:
 2. OS/editor/agent-local state;
 3. language-specific groups selected by project markers.
 
-Exact existing pattern lines are not duplicated. A missing set is appended
-under `# Added by coding-agent workspace setup`. Writes use a same-directory
-temporary file and `os.replace`, preserving existing content and newline
-termination.
+Existing content is preserved verbatim. A complete, internally de-duplicated
+managed rule set is appended under `# Added by coding-agent workspace setup`.
+The managed rules intentionally remain last even when an earlier pattern is
+identical: a later user negation such as `!.env` must not expose credentials to
+the initial commit. Writes use a same-directory temporary file and `os.replace`,
+preserving existing content and newline termination.
 
 Project detection is deterministic and filesystem-only:
 

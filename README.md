@@ -38,7 +38,7 @@ the cited successful verification belongs to the current workspace version.
 - Python 3.11 or newer
 - Git on `PATH`
 - An OpenAI-compatible `/chat/completions` endpoint with native tool calling
-- A target workspace that is already a Git repository
+- A local target workspace directory
 
 ## Install
 
@@ -85,6 +85,13 @@ coding-agent run \
   --workspace path/to/target-repository \
   "Fix the parser bug and run the relevant tests"
 ```
+
+If the target is not yet a Git repository, the trusted CLI startup path creates
+one, appends protective and project-aware `.gitignore` rules, stages the
+non-ignored baseline, and creates `chore: initialize repository` with the
+user's configured Git identity. Existing repositories are not modified during
+startup. A subdirectory of an enclosing repository is rejected; run from that
+repository's root instead.
 
 By default, command execution and deletion require an exact interactive
 approval. Read-only tools and hash-guarded workspace edits run automatically.
