@@ -27,6 +27,14 @@ commands, presentation, and bounded history. It supplies recent outcomes only
 as labeled context; the repository remains authoritative and every request
 crosses the same `LocalAgentRunner` interface.
 
+`TerminalPrompt.readline(prompt) -> str` owns editable terminal input and the
+slash-command selector. It hides Windows/POSIX key decoding, Unicode display
+width, menu filtering, cursor movement, and the redirected line-mode fallback.
+
+`describe_tool(...)` and `describe_tool_result(...)` project untrusted tool
+arguments/results into bounded, content-free progress details shared by events
+and approval summaries.
+
 `load_user_settings(path) -> UserSettings` is the per-user configuration
 boundary. It owns the fixed path, bounded UTF-8 JSON decoding, complete schema
 validation, relative run-directory resolution, and secret-safe errors. The CLI
@@ -41,7 +49,7 @@ Internal seams have at least production and test adapters:
 | Approval | terminal prompt/scoped policy | fixed decision |
 | Events | JSONL/console | in-memory sink |
 | Clock | system clock | virtual clock |
-| Terminal | stdio with optional ANSI styling | injected text streams |
+| Terminal | raw-key prompt plus line fallback | injected key reader/text streams |
 | User settings | fixed per-user JSON file | temporary JSON file or value object |
 
 Vendor responses, subprocess objects, and CLI rendering do not enter the core
@@ -118,6 +126,12 @@ small environment allowlist that excludes the model API key. Command execution
 and deletion require approval unless a narrow startup policy pre-authorizes the
 executable. Output is bounded, redacted, stored as an artifact, and exposed to
 the model through previews and paged reads.
+
+Human progress events carry a bounded tool target/outcome rather than raw
+contents or command arguments. Approval shows the same concise description,
+the OS-account risk, and a short digest first. The user can request full
+redacted JSON arguments and the full digest before approving; only an explicit
+affirmative answer approves.
 
 ## State and context
 

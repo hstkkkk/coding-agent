@@ -42,6 +42,7 @@ from .domain import (
     action_name,
 )
 from .events import EventEmitter
+from .presentation import describe_tool, describe_tool_result
 from .tools.runtime import ToolRuntime
 
 
@@ -213,6 +214,11 @@ class AgentEngine:
                 emitter.emit(
                     "model_action",
                     action=action_name(turn.action),
+                    detail=(
+                        describe_tool(turn.action.name, turn.action.arguments)
+                        if isinstance(turn.action, ToolCall)
+                        else ""
+                    ),
                     rationale=turn.rationale[:1_000],
                     repeated=state.repeated_actions,
                 )
@@ -336,6 +342,11 @@ class AgentEngine:
             "tool_finished",
             action_id=action_id,
             tool=result.tool_name,
+            detail=describe_tool_result(
+                turn.action.name,
+                turn.action.arguments,
+                result.data,
+            ),
             status=result.status.value,
             error_code=result.error_code.value if result.error_code else None,
             duration_ms=result.duration_ms,

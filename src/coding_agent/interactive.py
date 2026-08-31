@@ -9,10 +9,18 @@ from pathlib import Path
 from typing import Callable, TextIO
 
 from .domain import RunResult, RunStatus
+from .terminal import CommandChoice, TerminalPrompt
 
 
 _HISTORY_LIMIT = 6
 _CONTEXT_CHAR_LIMIT = 4_000
+_COMMANDS = (
+    CommandChoice("/help", "Show this help."),
+    CommandChoice("/workspace", "Show the active repository root."),
+    CommandChoice("/history", "Show runs from this terminal session."),
+    CommandChoice("/clear", "Clear an ANSI-capable terminal."),
+    CommandChoice("/exit", "End the session."),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +48,11 @@ class InteractiveSession:
         self.input = input_stream or sys.stdin
         self.output = output_stream or sys.stdout
         self.styled = self._detect_styling() if styled is None else styled
+        self.prompt = TerminalPrompt(
+            commands=_COMMANDS,
+            input_stream=self.input,
+            output_stream=self.output,
+        )
         self.history: list[InteractiveHistoryEntry] = []
 
     def run(self, run_task: Callable[[str], RunResult]) -> int:
@@ -81,8 +94,7 @@ class InteractiveSession:
             self._render_result(result)
 
     def _readline(self) -> str:
-        self._write(self._style("coding-agent> ", "36"), flush=True)
-        return self.input.readline()
+        return self.prompt.readline(self._style("coding-agent> ", "36"))
 
     def _handle_command(self, raw: str) -> bool:
         command = raw.lower()
@@ -90,14 +102,12 @@ class InteractiveSession:
             self._write("Session ended.\n")
             return True
         if command == "/help":
-            self._write(
-                "Commands:\n"
-                "  /help       Show this help.\n"
-                "  /workspace  Show the active repository root.\n"
-                "  /history    Show runs from this terminal session.\n"
-                "  /clear      Clear an ANSI-capable terminal.\n"
-                "  /exit       End the session.\n"
-            )
+            width = max(len(choice.command) for choice in _COMMANDS)
+            self._write("Commands:\n")
+            for choice in _COMMANDS:
+                self._write(
+                    f"  {choice.command:<{width}}  {choice.description}\n"
+                )
             return False
         if command == "/workspace":
             self._write(f"Workspace: {self.workspace}\n")
@@ -119,7 +129,7 @@ class InteractiveSession:
             self._style("Bounded Coding Agent", "1;36")
             + f"\nWorkspace: {self.workspace}"
             + f"\nModel: {self.model_label}"
-            + "\nType /help for commands or /exit to quit.\n\n"
+            + "\nType / to browse commands, or /exit to quit.\n\n"
         )
 
     def _render_result(self, result: RunResult) -> None:

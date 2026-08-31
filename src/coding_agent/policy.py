@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
+import unicodedata
 from pathlib import Path
+from typing import TextIO
 
 from .domain import ApprovalDecision, ApprovalPort, ApprovalRequest, RiskLevel
 
@@ -100,16 +103,72 @@ class FixedApprovalAdapter(ApprovalPort):
 
 
 class PromptApprovalAdapter(ApprovalPort):
+    def __init__(
+        self,
+        *,
+        input_stream: TextIO | None = None,
+        output_stream: TextIO | None = None,
+        detail_width: int = 100,
+    ) -> None:
+        self.input = input_stream or sys.stdin
+        self.output = output_stream or sys.stdout
+        self.detail_width = max(40, detail_width)
+
     def request(self, request: ApprovalRequest) -> ApprovalDecision:
-        print(f"Approval required [{request.risk.value}]: {request.summary}")
-        print(f"Operation digest: {request.operation_digest[:12]}")
-        try:
-            answer = input("Approve this exact operation? [y/N] ").strip().lower()
-        except EOFError:
-            return ApprovalDecision(False, "no interactive input was available")
-        if answer in {"y", "yes"}:
-            return ApprovalDecision(True, "approved interactively")
-        return ApprovalDecision(False, "declined interactively")
+        self._write(
+            f"\nApproval required [{request.risk.value}]\n"
+            f"  Action: {_approval_action(request.tool_name)}\n"
+            f"  Request: {request.summary or request.tool_name}\n"
+            f"  Risk: {_risk_description(request.risk)}\n"
+            f"  Operation digest: {request.operation_digest[:12]}\n"
+        )
+        while True:
+            self._write(
+                "Approve this exact digest? "
+                "[y]es / [d]etails / [N]o: ",
+                flush=True,
+            )
+            answer = self.input.readline()
+            if answer == "":
+                return ApprovalDecision(False, "no interactive input was available")
+            choice = answer.strip().lower()
+            if choice in {"y", "yes"}:
+                return ApprovalDecision(True, "approved interactively")
+            if choice in {"", "n", "no"}:
+                return ApprovalDecision(False, "declined interactively")
+            if choice in {"d", "detail", "details"}:
+                self._render_details(request)
+                continue
+            self._write("Enter y to approve, d for details, or n to deny.\n")
+
+    def _render_details(self, request: ApprovalRequest) -> None:
+        encoded = json.dumps(
+            {"tool": request.tool_name, "arguments": request.arguments},
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        encoded = "".join(
+            f"\\u{ord(character):04x}"
+            if unicodedata.category(character) == "Cf"
+            else character
+            for character in encoded
+        )
+        self._write(
+            "\nFull arguments (redacted JSON; visual wrapping only):\n"
+        )
+        for line in encoded.splitlines() or [""]:
+            if not line:
+                self._write("\n")
+                continue
+            for offset in range(0, len(line), self.detail_width):
+                self._write("  " + line[offset : offset + self.detail_width] + "\n")
+        self._write(f"Exact operation digest: {request.operation_digest}\n\n")
+
+    def _write(self, value: str, *, flush: bool = False) -> None:
+        self.output.write(value)
+        if flush:
+            self.output.flush()
 
 
 class ScopedApprovalAdapter(ApprovalPort):
@@ -135,3 +194,18 @@ class ScopedApprovalAdapter(ApprovalPort):
 
 def needs_approval(risk: RiskLevel) -> bool:
     return risk in {RiskLevel.DELETE, RiskLevel.EXECUTION}
+
+
+def _approval_action(tool_name: str) -> str:
+    return {
+        "run_command": "Run a local program",
+        "delete_file": "Delete a workspace file",
+    }.get(tool_name, tool_name)
+
+
+def _risk_description(risk: RiskLevel) -> str:
+    if risk is RiskLevel.EXECUTION:
+        return "Runs with your operating-system account permissions."
+    if risk is RiskLevel.DELETE:
+        return "Permanently removes the named workspace file."
+    return "Changes the current workspace."

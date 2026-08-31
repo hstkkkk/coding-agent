@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -20,6 +19,7 @@ from ..domain import (
 )
 from ..events import Redactor
 from ..policy import PathPolicy, PolicyViolation, needs_approval, operation_digest
+from ..presentation import describe_tool
 from .filesystem import EditConflict, FileTools, ToolInputError
 from .git import GitInspector
 from .process import ProcessRunner
@@ -102,9 +102,9 @@ class LocalToolRuntime(ToolRuntime):
                 self._check_command_policy(call.arguments)
             if needs_approval(definition.risk):
                 digest = operation_digest(call.name, call.arguments)
-                summary = self.redactor.text(
-                    f"{call.name} {json.dumps(call.arguments, ensure_ascii=False, sort_keys=True)}"
-                )
+                summary = self.redactor.text(describe_tool(call.name, call.arguments))
+                safe_arguments = self.redactor.value(dict(call.arguments))
+                assert isinstance(safe_arguments, dict)
                 decision = self.approvals.request(
                     request=ApprovalRequest(
                         action_id,
@@ -112,7 +112,7 @@ class LocalToolRuntime(ToolRuntime):
                         definition.risk,
                         summary,
                         digest,
-                        dict(call.arguments),
+                        safe_arguments,
                     )
                 )
                 if not decision.approved:

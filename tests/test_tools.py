@@ -130,6 +130,26 @@ class LocalToolRuntimeTests(unittest.TestCase):
         self.assertEqual(result.status, ToolStatus.REJECTED)
         self.assertEqual(result.error_code, ErrorCode.APPROVAL_DENIED)
 
+    def test_approval_request_is_concise_and_its_arguments_are_redacted(self) -> None:
+        inline_code = "unit-test-secret-value" + ("x" * 2_000)
+        result = self.execute(
+            "run_command",
+            {
+                "program": "python",
+                "args": ["-c", inline_code],
+                "cwd": ".",
+                "purpose": "verify",
+            },
+        )
+
+        request = self.approvals.requests[-1]
+        self.assertEqual(result.status, ToolStatus.COMPLETED)
+        self.assertLess(len(request.summary), 200)
+        self.assertNotIn(inline_code, request.summary)
+        self.assertIn("inline code=2022 chars", request.summary)
+        self.assertNotIn("unit-test-secret-value", str(request.arguments))
+        self.assertIn("REDACTED", str(request.arguments))
+
     def test_blocks_git_write_even_if_approved(self) -> None:
         result = self.execute("run_command", {"program": "git", "args": ["push"]})
         self.assertEqual(result.error_code, ErrorCode.POLICY_DENIED)

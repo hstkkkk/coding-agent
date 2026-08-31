@@ -48,6 +48,7 @@ class InteractiveSessionTests(unittest.TestCase):
         self.assertIn("task two", objectives[-1])
         rendered = output.getvalue()
         self.assertIn("Bounded Coding Agent", rendered)
+        self.assertIn("Type / to browse commands", rendered)
         self.assertIn("SUCCEEDED", rendered)
         self.assertIn("8" * 32, rendered)
 

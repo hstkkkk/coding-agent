@@ -6,11 +6,15 @@ The next release makes `coding-agent` useful from the root of an ordinary local
 project without requiring the user to remember a subcommand or prepare Git
 manually.
 
-It adds two connected capabilities:
+It provides five connected capabilities:
 
 1. running bare `coding-agent` opens an interactive terminal session;
 2. starting a task in a directory that is not yet a Git repository safely
-   creates the repository, a protective `.gitignore`, and an initial commit.
+   creates the repository, a protective `.gitignore`, and an initial commit;
+3. typing `/` opens a keyboard-selectable session-command catalog;
+4. progress lines identify the target and observable result of each tool;
+5. risky operations use a concise approval summary with full redacted details
+   available on demand.
 
 The existing `coding-agent run`, `inspect-run`, and `eval` commands remain
 available for scripts and repeatable evaluation.
@@ -31,11 +35,26 @@ final diff. Today, a non-Git directory is rejected with a configuration error.
 That is safe but interrupts the first-run experience and asks the user to know
 which initialization steps preserve secrets and produce a useful baseline.
 
+### Interaction clarity
+
+Raw tool names do not explain which path or command is being handled, and a
+full JSON command dumped into an approval prompt is too large to evaluate.
+Likewise, commands hidden behind `/help` are not discoverable before a new user
+already knows that `/help` exists. The terminal needs progressive disclosure:
+short target-aware progress, a summary-first approval, and an immediate command
+catalog.
+
 ## Product goals
 
 - `coding-agent` with no arguments opens a terminal UI in the current directory.
 - A user can submit multiple natural-language requests without restarting the
   process.
+- Typing `/` exposes all session commands immediately, with arrow-key selection
+  and type-to-filter behavior.
+- Model/tool progress names the directory, file, command, or output being
+  handled and reports a compact observable result.
+- Execution approval starts with a bounded risk summary and makes full
+  redacted arguments available on demand.
 - Each submitted request remains one bounded, independently logged agent run.
 - The session keeps compact context for follow-up requests without weakening
   controller-owned budgets, permissions, or completion checks.
@@ -85,7 +104,7 @@ It then opens the session:
 Bounded Coding Agent
 Workspace: C:\work\calculator
 Model: deepseek-v4-flash
-Type /help for commands or /exit to quit.
+Type / to browse commands, or /exit to quit.
 
 coding-agent> Fix the failing parser tests
 ```
@@ -93,6 +112,37 @@ coding-agent> Fix the failing parser tests
 Model and tool events remain visible while the task runs. When the controller
 reaches a terminal state, the UI prints the status and run ID, then returns to
 the prompt.
+
+### Readable progress
+
+Each model decision and tool result names its target instead of repeating only
+the tool name:
+
+```text
+[MODEL] list_directory · path=.
+[TOOL] list_directory · path=. · 1 entry -> COMPLETED (2 ms)
+[MODEL] create_file · path=index.html · 12640 chars
+[TOOL] create_file · path=index.html · changed -> COMPLETED (18 ms)
+[MODEL] run_command · program=node · cwd=. · purpose=verify · 2 args · inline code=3012 chars
+[TOOL] run_command · program=node · exit=0 -> COMPLETED (412 ms)
+```
+
+File contents, inline scripts, search terms, and output bodies are represented
+by bounded metadata rather than echoed into the progress stream. Consecutive
+identical actions show a repetition count.
+
+### Layered approval
+
+An execution approval initially shows the action, bounded request summary,
+OS-account risk, and the digest of the exact operation. The choice prompt is:
+
+```text
+Approve this exact digest? [y]es / [d]etails / [N]o:
+```
+
+`d` prints the complete redacted arguments as wrapped JSON and the full digest,
+then asks again. This keeps the default prompt scannable without hiding the
+information needed for a deliberate decision. Empty input remains a denial.
 
 ### Existing Git repository
 
@@ -125,6 +175,12 @@ The initial terminal UI supports:
 An empty line is ignored. End-of-file exits successfully. `Ctrl+C` at the prompt
 cancels the current input and keeps the session open; a second immediate exit
 command remains explicit and predictable.
+
+On a real terminal, `/` opens the command candidates before Enter is pressed.
+Up/down arrows change the selection, Enter confirms it, ordinary characters
+filter by command prefix, Backspace edits the filter or cancels an empty menu,
+and Escape cancels. Redirected stdin retains the deterministic line-mode
+behavior used by scripts.
 
 ## Conversation model
 
@@ -182,7 +238,12 @@ subprocesses receive a filtered environment and never run through a shell.
 ## Success criteria
 
 - Bare `coding-agent` reaches a prompt in an existing repository.
+- `/` immediately displays every command and supports keyboard selection.
 - A natural-language line launches a real bounded run and returns to the prompt.
+- Every file/directory tool progress line names its target; command progress
+  names the executable, purpose, and exit code without dumping inline code.
+- Approval initially stays bounded, `d` reveals full redacted arguments, and
+  Enter without an affirmative answer denies the operation.
 - `/history` shows the resulting run ID and terminal status.
 - Exiting the terminal returns code `0` without changing repository state.
 - A non-Git directory with source files becomes a Git repository with one

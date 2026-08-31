@@ -80,7 +80,10 @@ class FakeClock:
 
 
 def edit_turn() -> AssistantTurn:
-    return AssistantTurn("make minimal edit", ToolCall("c1", "edit_file", {}))
+    return AssistantTurn(
+        "make minimal edit",
+        ToolCall("c1", "edit_file", {"path": "app.py"}),
+    )
 
 
 def verify_turn() -> AssistantTurn:
@@ -124,6 +127,10 @@ class AgentEngineTests(unittest.TestCase):
         self.assertTrue(result.verifications[0].passed)
         self.assertEqual(tools.calls, ["edit_file", "run_command", "git_diff"])
         self.assertEqual(events.events[-1].kind, "terminal")
+        model_events = [event for event in events.events if event.kind == "model_action"]
+        tool_events = [event for event in events.events if event.kind == "tool_finished"]
+        self.assertEqual(model_events[0].data["detail"], "path=app.py")
+        self.assertEqual(tool_events[0].data["detail"], "path=app.py · changed")
 
     def test_rejects_finish_without_evidence_then_allows_blocked(self) -> None:
         result, _, _, events = self.run_engine(

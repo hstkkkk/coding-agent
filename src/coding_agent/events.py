@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import unicodedata
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -95,11 +96,25 @@ class ConsoleEventSink(EventSink):
         assert isinstance(sanitized, dict)
         data = sanitized
         if event.kind == "model_action":
-            print(f"[MODEL] {data.get('action', 'unknown')}: {data.get('rationale', '')}")
+            parts = [
+                _console_text(data.get("action", "unknown")),
+                _console_text(data.get("detail", "")),
+            ]
+            repeated = data.get("repeated")
+            if isinstance(repeated, int) and repeated > 1:
+                parts.append(f"repeated {repeated}x")
+            line = "[MODEL] " + " · ".join(part for part in parts if part)
+            rationale = _console_text(data.get("rationale", ""), limit=180)
+            if rationale:
+                line += f" — {rationale}"
+            print(line)
         elif event.kind == "tool_finished":
+            detail = _console_text(data.get("detail", ""))
+            detail_fragment = f" · {detail}" if detail else ""
             print(
-                f"[TOOL] {data.get('tool', 'unknown')} -> "
-                f"{data.get('status', 'UNKNOWN')} ({data.get('duration_ms', 0)} ms)"
+                f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{detail_fragment} -> "
+                f"{_console_text(data.get('status', 'UNKNOWN'))} "
+                f"({data.get('duration_ms', 0)} ms)"
             )
         elif event.kind == "verification_rejected":
             print(f"[VERIFY] rejected: {data.get('reason', '')}")
@@ -157,3 +172,16 @@ def _restrict_permissions(path: Path, mode: int) -> None:
     except OSError:
         # Windows ACLs and some mounted filesystems do not implement POSIX modes.
         pass
+
+
+def _console_text(value: Any, *, limit: int = 240) -> str:
+    raw = " ".join(str(value).split())
+    rendered: list[str] = []
+    for character in raw[:limit]:
+        if unicodedata.category(character).startswith("C"):
+            rendered.append(f"\\u{ord(character):04x}")
+        else:
+            rendered.append(character)
+    if len(raw) > limit:
+        rendered.append("…")
+    return "".join(rendered)

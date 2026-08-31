@@ -143,6 +143,10 @@ creates a fresh bounded run with its own ID, budgets, event log, artifacts, and
 verification evidence. The working tree and a compact summary of up to six
 recent requests provide continuity for follow-up tasks.
 
+In an interactive terminal, typing `/` immediately opens the command list.
+Use the up/down arrows and Enter to select, or continue typing to filter the
+list. Redirected input keeps the plain line-oriented fallback.
+
 Session commands:
 
 ```text
@@ -151,6 +155,14 @@ Session commands:
 /history    show recent tasks, statuses, and run IDs
 /clear      clear an ANSI-capable terminal
 /exit       end the session
+```
+
+Progress lines identify the object being handled and the observable result:
+
+```text
+[MODEL] read_file · path=index.html
+[TOOL] read_file · path=index.html · lines=1-240 · 9821 chars -> COMPLETED (2 ms)
+[MODEL] run_command · program=node · cwd=. · purpose=verify · 2 args · inline code=2140 chars
 ```
 
 Use the explicit subcommand when passing startup options:
@@ -187,6 +199,11 @@ coding-agent run \
 
 Pre-authorizing an executable permits the target repository to execute code
 through it. Use the option only for repositories you are prepared to run.
+
+When approval is required, the first screen shows a bounded command summary,
+risk, and operation digest. Choose `d` to inspect the complete redacted JSON
+arguments with visual wrapping, `y` to approve that exact digest, or `n` to
+deny. Long inline scripts are never dumped into the initial approval prompt.
 
 Useful options:
 

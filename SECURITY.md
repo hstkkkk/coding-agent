@@ -11,10 +11,14 @@ permissions.
 - hash-guarded edits and explicit create/delete operations;
 - no shell interpretation for normal commands;
 - interactive approval for command execution and deletion;
+- bounded approval summaries with on-demand redacted arguments bound to the
+  exact operation digest;
 - explicit, executable-scoped pre-approval for automated runs;
 - filtered child-process environment without the model API key;
 - bounded model turns, process time, file reads, search results, and outputs;
 - best-effort secret redaction before content reaches logs or model context;
+- bounded progress descriptions that omit file contents, script bodies, search
+  strings, and raw command arguments;
 - read-only Git tools and rejection of common Git history/write operations;
 - trusted pre-run Git initialization with credential-protecting ignore rules
   and a filtered subprocess environment;

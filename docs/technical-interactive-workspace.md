@@ -28,7 +28,17 @@ CLI composition root
   |
   +--> InteractiveSession.run(run_task) -> int
           |
+          +--> TerminalPrompt.readline(prompt) -> str
           +--> terminal input/output + bounded session history
+
+AgentEngine event projection
+  |
+  +--> describe_tool(name, arguments) -> bounded detail
+  +--> describe_tool_result(name, arguments, data) -> bounded outcome
+
+LocalToolRuntime approval
+  |
+  +--> PromptApprovalAdapter.request(request) -> ApprovalDecision
 ```
 
 These are deep modules: callers learn one operation while Git recovery,
@@ -177,10 +187,43 @@ set. Plain text is the complete fallback, which keeps Windows and redirected
 tests deterministic. `/clear` emits ANSI clear-screen codes only in styled
 mode.
 
+`TerminalPrompt.readline(prompt) -> str` owns platform key decoding and the
+slash-command selector behind one interface. Windows uses `msvcrt.getwch` and
+recognizes both Windows extended keys and ConPTY escape sequences. POSIX uses a
+temporary raw terminal mode and decodes common ANSI navigation sequences. The
+implementation restores terminal mode before returning, so command approvals
+continue to use normal line input. Redirected streams bypass key handling and
+call `readline` directly.
+
+The prompt maintains a Unicode-aware editable buffer with left/right,
+Home/End, Backspace, and Delete behavior. A leading `/` opens the static command
+catalog immediately; selection and prefix filtering stay internal to the
+module. Tests inject semantic key events at the same `readline` interface.
+
 `KeyboardInterrupt` while reading a prompt prints a cancellation hint and
 returns to the prompt. EOF exits cleanly. A `KeyboardInterrupt` escaping a run
 is reported as an interrupted task and does not synthesize a successful
 `RunResult`.
+
+## Progress projection and approval
+
+`src/coding_agent/presentation.py` owns bounded descriptions for every tool.
+It includes paths, line ranges, entry/match counts, executable, cwd, purpose,
+argument count, inline-code length, exit code, and mutation status as
+applicable. It never embeds file contents, script bodies, search strings, or
+full output. Control/format characters are escaped before reaching the console.
+
+`AgentEngine` adds only these bounded descriptions to `model_action` and
+`tool_finished` events. `ConsoleEventSink` renders them and omits empty
+rationale punctuation; JSONL and JSON-console event shapes remain additive and
+redacted.
+
+Before approval, `LocalToolRuntime` computes the operation digest from the
+original arguments, then supplies `PromptApprovalAdapter` with a bounded tool
+description and a separately redacted argument object. The adapter shows only
+the summary by default. `d` renders the full redacted JSON with visual wrapping
+and the full digest, while `y` approves and empty input/`n` denies. The digest,
+not the display wrapping, identifies the exact operation.
 
 ## CLI integration
 
@@ -219,6 +262,10 @@ a one-time `uv tool install --editable <project>` for users who want bare
 - Commit identity is inherited from Git configuration and never fabricated.
 - Setup messages and failures contain bounded Git output and no environment
   dump.
+- Initial approval prompts never dump file/script content; expanded details are
+  redacted and still bound to the original operation digest.
+- Console progress escapes control characters supplied through model arguments
+  and bounds every free-form field.
 
 ## Tests
 
@@ -242,8 +289,19 @@ added solely for tests.
 - a natural-language line invokes the runner exactly once;
 - multiple requests produce separate history entries and bounded context;
 - slash commands do not invoke the runner;
+- `/` opens a command catalog; arrow keys, filtering, Backspace, Escape, Enter,
+  Unicode input, and redirected line mode behave deterministically;
 - `/history`, EOF, `/exit`, and `KeyboardInterrupt` behave deterministically;
 - plain output contains workspace, result status, and run ID.
+
+### Presentation and approval tests
+
+- each file tool names its path without including content;
+- long inline commands report only program, metadata, and code length in the
+  initial progress/approval summary;
+- tool results report entry counts, changed paths, or exit codes;
+- `d` exposes wrapped redacted arguments and the full digest before reprompting;
+- empty approval input denies and concise prompts stay bounded.
 
 ### Regression and smoke checks
 
@@ -252,7 +310,6 @@ added solely for tests.
 - automatic initialization smoke test in a temporary non-Git directory;
 - `git diff --check` and a final repository status inspection.
 
-The live model evaluation is not required by this change because the model
-adapter, controller loop, tool protocol, and evaluator semantics remain
-unchanged. A live smoke run may be performed separately when credentials and
-cost authorization are available.
+The tool schema and completion semantics remain unchanged, but the controller's
+event projection path is touched. Run the live evaluation suite when configured
+and still require agent success, Oracle exit code `0`, and zero false successes.
