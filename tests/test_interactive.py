@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import io
+import tempfile
 import unittest
 from pathlib import Path
 
+from coding_agent.conversation import ConversationStore
 from coding_agent.domain import RunResult, RunStatus
+from coding_agent.events import Redactor
 from coding_agent.interactive import InteractiveSession
 
 
 class InteractiveSessionTests(unittest.TestCase):
-    def test_runs_multiple_requests_with_bounded_session_context(self) -> None:
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        root = Path(self.temporary.name)
+        self.workspace = root / "workspace"
+        self.workspace.mkdir()
+        self.store = ConversationStore(root / "sessions", Redactor())
+
+    def test_runs_multiple_requests_with_persistent_session_context(self) -> None:
         source = io.StringIO(
             "task one\n"
             "task two\n"
@@ -31,7 +42,7 @@ class InteractiveSessionTests(unittest.TestCase):
             return self._result(index)
 
         session = InteractiveSession(
-            workspace=Path("C:/work/example"),
+            conversation=self.store.create(self.workspace),
             model_label="test-model",
             input_stream=source,
             output_stream=output,
@@ -44,23 +55,27 @@ class InteractiveSessionTests(unittest.TestCase):
         self.assertEqual(len(objectives), 8)
         self.assertEqual(objectives[0], "task one")
         self.assertIn("Current request:\ntask eight", objectives[-1])
-        self.assertNotIn("task one", objectives[-1])
+        self.assertIn("task one", objectives[-1])
         self.assertIn("task two", objectives[-1])
+        self.assertIn("summary-7", objectives[-1])
         rendered = output.getvalue()
         self.assertIn("Bounded Coding Agent", rendered)
+        self.assertIn("Session:", rendered)
         self.assertIn("Type / to browse commands", rendered)
         self.assertIn("SUCCEEDED", rendered)
         self.assertIn("8" * 32, rendered)
 
     def test_slash_commands_do_not_invoke_runner(self) -> None:
-        source = io.StringIO("/help\n/workspace\n/history\n/clear\n/unknown\n/quit\n")
+        source = io.StringIO(
+            "/help\n/workspace\n/session\n/history\n/clear\n/unknown\n/quit\n"
+        )
         output = io.StringIO()
 
         def unexpected(_: str) -> RunResult:
             self.fail("slash command invoked the task runner")
 
         session = InteractiveSession(
-            workspace=Path("C:/work/example"),
+            conversation=self.store.create(self.workspace),
             model_label="test-model",
             input_stream=source,
             output_stream=output,
@@ -70,7 +85,8 @@ class InteractiveSessionTests(unittest.TestCase):
         self.assertEqual(session.run(unexpected), 0)
         rendered = output.getvalue()
         self.assertIn("/help", rendered)
-        self.assertIn("C:\\work\\example", rendered.replace("/", "\\"))
+        self.assertIn(str(self.workspace.resolve()), rendered)
+        self.assertIn("Session ID:", rendered)
         self.assertIn("No tasks have run in this session.", rendered)
         self.assertIn("Screen clearing is unavailable", rendered)
         self.assertIn("Unknown command: /unknown", rendered)
@@ -78,7 +94,7 @@ class InteractiveSessionTests(unittest.TestCase):
     def test_eof_exits_without_running_a_task(self) -> None:
         output = io.StringIO()
         session = InteractiveSession(
-            workspace=Path("."),
+            conversation=self.store.create(self.workspace),
             model_label="test-model",
             input_stream=io.StringIO(""),
             output_stream=output,
@@ -92,7 +108,7 @@ class InteractiveSessionTests(unittest.TestCase):
         output = io.StringIO()
         source = _InterruptOnce("/exit\n")
         session = InteractiveSession(
-            workspace=Path("."),
+            conversation=self.store.create(self.workspace),
             model_label="test-model",
             input_stream=source,
             output_stream=output,
@@ -106,7 +122,7 @@ class InteractiveSessionTests(unittest.TestCase):
         source = io.StringIO(("x" * 8_000) + "\nnext task\n/exit\n")
         objectives: list[str] = []
         session = InteractiveSession(
-            workspace=Path("."),
+            conversation=self.store.create(self.workspace),
             model_label="test-model",
             input_stream=source,
             output_stream=io.StringIO(),
@@ -119,15 +135,46 @@ class InteractiveSessionTests(unittest.TestCase):
 
         self.assertEqual(session.run(run_task), 0)
         self.assertEqual(len(objectives), 2)
-        self.assertLess(len(objectives[1]), 4_500)
-        self.assertIn("...[truncated]", objectives[1])
+        self.assertLess(len(objectives[1]), 19_000)
+        self.assertIn("...[compacted]...", objectives[1])
+
+    def test_new_process_can_resume_and_continue_with_assistant_response(self) -> None:
+        conversation = self.store.create(self.workspace)
+        first = InteractiveSession(
+            conversation=conversation,
+            model_label="test-model",
+            input_stream=io.StringIO("Who are you?\n/exit\n"),
+            output_stream=io.StringIO(),
+            styled=False,
+        )
+        self.assertEqual(first.run(lambda _: self._result(1)), 0)
+
+        objectives: list[str] = []
+        output = io.StringIO()
+        resumed = InteractiveSession(
+            conversation=self.store.resume(conversation.session_id, self.workspace),
+            model_label="test-model",
+            input_stream=io.StringIO("What did you say?\n/exit\n"),
+            output_stream=output,
+            styled=False,
+        )
+
+        self.assertEqual(
+            resumed.run(
+                lambda objective: objectives.append(objective) or self._result(2)
+            ),
+            0,
+        )
+        self.assertIn("Who are you?", objectives[0])
+        self.assertIn("summary-1", objectives[0])
+        self.assertIn("resumed", output.getvalue().lower())
 
     @staticmethod
     def _result(index: int) -> RunResult:
         return RunResult(
             run_id=str(index) * 32,
             status=RunStatus.SUCCEEDED,
-            summary="done",
+            summary=f"summary-{index}",
             changed_files=(f"file-{index}.txt",),
             verifications=(),
         )

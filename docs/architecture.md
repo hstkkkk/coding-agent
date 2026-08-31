@@ -23,9 +23,14 @@ interface used by both one-shot and interactive commands. Its implementation
 creates a new run ID, events, artifacts, tools, and `AgentEngine` for every
 call, so interactive turns never share controller state or verification.
 
+`ConversationStore.create/resume/list` and `ConversationSession.prepare/record`
+own durable conversation identity, workspace binding, JSONL validation,
+redaction, and automatic context compaction. Their small interface prevents the
+terminal and CLI from depending on the persistence format.
+
 `InteractiveSession.run(run_task) -> int` owns the terminal grammar, slash
-commands, presentation, and bounded history. It supplies recent outcomes only
-as labeled context; the repository remains authoritative and every request
+commands, and presentation. It delegates history and bounded context to one
+`ConversationSession`; the repository remains authoritative and every request
 crosses the same `LocalAgentRunner` interface.
 
 `TerminalPrompt.readline(prompt) -> str` owns editable terminal input and the
@@ -38,7 +43,7 @@ and approval summaries.
 
 `load_user_settings(path) -> UserSettings` is the per-user configuration
 boundary. It owns the fixed path, bounded UTF-8 JSON decoding, complete schema
-validation, relative run-directory resolution, and secret-safe errors. The CLI
+validation, relative run/session-directory resolution, and secret-safe errors. The CLI
 receives only the validated immutable value object.
 
 Internal seams have at least production and test adapters:
@@ -52,6 +57,7 @@ Internal seams have at least production and test adapters:
 | Clock | system clock | virtual clock |
 | Terminal | raw-key prompt plus line fallback | injected key reader/text streams |
 | User settings | fixed per-user JSON file | temporary JSON file or value object |
+| Conversation | locked per-user JSONL store | temporary-directory store |
 
 Vendor responses, subprocess objects, and CLI rendering do not enter the core
 data model.
@@ -155,6 +161,19 @@ Old events remain on disk when they fall out of the model view. Repository
 contents and tool output are treated as untrusted data and cannot grant new
 permissions.
 
+Interactive continuity is a separate layer around independent runs. Each
+completed turn appends a redacted record containing only the request, assistant
+outcome, terminal status, run ID, and changed-path names. Resume validates a
+32-hex ID and requires the original canonical workspace. It does not restore an
+in-flight engine, approvals, tool observations, budgets, or verification
+records.
+
+Before a follow-up, the conversation store renders recent turns under a hard
+character budget. When the target is exceeded, it deterministically folds the
+oldest turns into persisted structured digests while retaining recent raw
+turns. This automatic compaction uses no additional model call. Restored text
+is labeled untrusted and cannot override the current repository or controller.
+
 ## Verification freshness
 
 Every detected workspace mutation increments `workspace_version`. A
@@ -198,11 +217,12 @@ coding evaluation; `ANSWERED` is always a non-pass.
 ## Known limitations
 
 - no operating-system or container sandbox;
-- no checkpoint/resume after a crash;
+- no checkpoint/resume for an in-flight run after a crash; only completed
+  conversation turns can be resumed;
 - no automatic network isolation for approved subprocesses;
 - no parallel tools or multi-agent coordination;
 - line-oriented terminal UI rather than a full-screen editor;
-- interactive history is in-memory and is not resumed after process exit;
+- no concurrent multi-process use of one conversation session;
 - no token-by-token model streaming;
 - UTF-8 text editing only;
 - optimized for small repositories and bounded tasks;

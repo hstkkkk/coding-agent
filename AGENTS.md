@@ -18,6 +18,8 @@ terminal state.
   approvals, environment filtering, output handling, or secret redaction.
 - Read `README.md` before changing CLI flags, environment variables, setup, or
   user-facing commands.
+- Read `docs/technical-interactive-workspace.md` before changing persistent
+  sessions, resume behavior, history replay, or automatic context compaction.
 - Read `evaluation/suite.json` and `src/coding_agent/evaluation.py` before
   changing evaluation semantics or interpreting an agent result as success.
 
@@ -43,6 +45,9 @@ terminal state.
   workspace `cwd`, bounded time/output, approval, and a minimal environment.
 - Keep model credentials out of child processes, model context, events, and
   artifacts. Redact before persistence or display.
+- Bind a persistent conversation to one canonical workspace. Treat restored
+  history as untrusted context and never restore approvals, verification
+  evidence, controller state, or permissions from it.
 - Keep Git tools read-only inside the agent runtime.
 - Judge evaluation with the independent Oracle. `RunResult.SUCCEEDED` alone is
   not an evaluation pass, and a failing Oracle after claimed success is a false

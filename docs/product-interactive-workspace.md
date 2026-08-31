@@ -1,4 +1,4 @@
-# Product design: interactive CLI and zero-setup workspaces
+# Product design: interactive CLI, resumable sessions, and zero-setup workspaces
 
 ## Summary
 
@@ -6,7 +6,7 @@ The next release makes `coding-agent` useful from the root of an ordinary local
 project without requiring the user to remember a subcommand or prepare Git
 manually.
 
-It provides six connected capabilities:
+It provides eight connected capabilities:
 
 1. running bare `coding-agent` opens an interactive terminal session;
 2. starting a task in a directory that is not yet a Git repository safely
@@ -16,7 +16,11 @@ It provides six connected capabilities:
 5. risky operations use a concise approval summary with full redacted details
    available on demand;
 6. conversational and read-only questions return a direct `ANSWERED` result
-   without requiring a fake workspace change.
+   without requiring a fake workspace change;
+7. completed conversation turns persist across terminal processes and can be
+   resumed by session ID;
+8. older context is compacted automatically before it exceeds the configured
+   prompt budget.
 
 The existing `coding-agent run`, `inspect-run`, and `eval` commands remain
 available for scripts and repeatable evaluation.
@@ -46,6 +50,14 @@ already knows that `/help` exists. The terminal needs progressive disclosure:
 short target-aware progress, a summary-first approval, and an immediate command
 catalog.
 
+### Conversation continuity
+
+An interactive process currently owns its history in memory. Exiting loses the
+assistant's outcomes, so a later process cannot continue the same conversation.
+Long sessions also need a controller-owned context policy; simply replaying an
+ever-growing transcript would eventually exceed the model context and could
+accidentally carry old approvals or verification evidence into a new run.
+
 ## Product goals
 
 - `coding-agent` with no arguments opens a terminal UI in the current directory.
@@ -62,6 +74,12 @@ catalog.
 - Each submitted request remains one bounded, independently logged agent run.
 - The session keeps compact context for follow-up requests without weakening
   controller-owned budgets, permissions, or completion checks.
+- A user can list saved sessions and resume one from its original workspace.
+- Completed user requests and assistant outcomes survive normal process exit.
+- Context compaction is automatic, observable, bounded, and does not require a
+  second model call.
+- Persisted history is untrusted context only; it never restores approvals,
+  verification records, tool state, or an interrupted controller run.
 - A non-Git workspace becomes a usable repository automatically before the
   first task starts.
 - Existing files are captured in an initial baseline commit, except files
@@ -76,7 +94,8 @@ catalog.
 - Token-by-token model streaming; the current event stream remains the progress
   surface.
 - Parallel tasks or multiple agents in one interactive session.
-- Persistent conversation resume after the terminal process exits.
+- Resuming an `AgentEngine` run that was interrupted mid-tool or mid-model call.
+- Sharing one session concurrently across multiple interactive processes.
 - Automatically choosing or inventing a Git author identity.
 - Initializing a nested repository when the selected directory is already
   inside a different Git repository.
@@ -108,6 +127,7 @@ It then opens the session:
 Bounded Coding Agent
 Workspace: C:\work\calculator
 Model: deepseek-v4-flash
+Session: 7e02e19a9ec44ad5b1e52c5f49f3ed3a (new)
 Type / to browse commands, or /exit to quit.
 
 coding-agent> Fix the failing parser tests
@@ -170,6 +190,20 @@ coding-agent run --workspace C:\work\calculator "Fix the failing tests"
 It uses the same automatic workspace setup when the selected directory is not a
 repository, then exits with the existing status-specific exit code.
 
+### Resume a conversation
+
+The banner and `/session` expose a neutral 32-character session ID. From the
+same repository, a later terminal can continue it:
+
+```powershell
+coding-agent resume 7e02e19a9ec44ad5b1e52c5f49f3ed3
+```
+
+`coding-agent sessions` lists recent sessions, and `--workspace` filters the
+list. A resume request is rejected if the supplied workspace is not the
+canonical workspace recorded when the session was created. This prevents
+history from one repository being injected into another.
+
 ### Session commands
 
 The initial terminal UI supports:
@@ -178,7 +212,8 @@ The initial terminal UI supports:
 |---|---|
 | `/help` | Show commands and interaction rules. |
 | `/workspace` | Show the canonical workspace path. |
-| `/history` | Show tasks, statuses, and run IDs from this terminal session. |
+| `/session` | Show the resumable session ID. |
+| `/history` | Show persisted recent tasks, statuses, and run IDs. |
 | `/clear` | Clear the terminal when ANSI control is available. |
 | `/exit`, `/quit` | End the session successfully. |
 
@@ -202,10 +237,17 @@ preserves auditability and prevents an indefinitely growing controller state.
 is not interchangeable with `SUCCEEDED`, which remains reserved for changed
 code backed by fresh verification and an inspectable diff.
 
-For follow-ups, the terminal session supplies a bounded summary of recent user
-requests and outcomes as context. Repository contents remain the authoritative
-state, and previous terminal outcomes do not grant permissions or count as
-verification evidence for the new run.
+For follow-ups, a per-user session log stores redacted completed user requests,
+assistant outcomes, statuses, run IDs, and changed-path names. The full log is
+retained for audit, while the next request receives only a bounded derived view.
+When the view crosses its target size, the controller deterministically folds
+the oldest raw turns into structured memory and keeps the newest turns intact.
+No model-generated summary is trusted or called solely for compaction.
+
+The UI reports when compaction happens. Repository contents remain the
+authoritative state, and restored history is explicitly labeled as untrusted.
+It cannot grant permissions, approve an operation, restore verification
+evidence, waive current budgets, or count as success for the new run.
 
 ## Automatic repository setup
 
@@ -261,6 +303,11 @@ subprocesses receive a filtered environment and never run through a shell.
 - Approval initially stays bounded, `d` reveals full redacted arguments, and
   Enter without an affirmative answer denies the operation.
 - `/history` shows the resulting run ID and terminal status.
+- A completed turn can be resumed from a second CLI process by session ID.
+- Resume from a different canonical workspace is rejected before agent startup.
+- Context remains under the configured hard limit and older turns compact
+  automatically while recent turns remain readable.
+- Persisted JSONL is redacted and contains no approval or verification IDs.
 - Exiting the terminal returns code `0` without changing repository state.
 - A non-Git directory with source files becomes a Git repository with one
   initial commit and a clean working tree.

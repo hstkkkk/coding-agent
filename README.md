@@ -84,7 +84,9 @@ DeepSeek-compatible configuration is:
   "max_seconds": 900,
   "command_timeout": 120,
   "approval_mode": "prompt",
-  "allow_programs": ["python"]
+  "allow_programs": ["python"],
+  "sessions_dir": "sessions",
+  "session_context_chars": 12000
 }
 ```
 
@@ -142,8 +144,9 @@ coding-agent
 
 This opens a line-oriented terminal session. Each natural-language submission
 creates a fresh bounded run with its own ID, budgets, event log, artifacts, and
-verification evidence. The working tree and a compact summary of up to six
-recent requests provide continuity for follow-up tasks.
+verification evidence. Completed requests and assistant outcomes persist in a
+redacted per-user session log. A bounded view supplies continuity to follow-up
+tasks without carrying approval or verification state between runs.
 
 In an interactive terminal, typing `/` immediately opens the command list.
 Use the up/down arrows and Enter to select, or continue typing to filter the
@@ -154,7 +157,8 @@ Session commands:
 ```text
 /help       show commands
 /workspace  show the active repository root
-/history    show recent tasks, statuses, and run IDs
+/session    show the resumable session ID
+/history    show persisted recent tasks, statuses, and run IDs
 /clear      clear an ANSI-capable terminal
 /exit       end the session
 ```
@@ -186,6 +190,20 @@ Use the explicit subcommand when passing startup options:
 ```powershell
 coding-agent tui --allow-program python --max-turns 40
 ```
+
+The banner prints a session ID. After exiting, resume from the same repository:
+
+```powershell
+coding-agent resume <session-id>
+```
+
+Discover recent IDs with `coding-agent sessions`, optionally filtered with
+`--workspace C:/path/to/project`. Resume rejects a different canonical
+workspace. When older history crosses the configured target, the controller
+automatically compacts it into bounded structured memory and reports the event.
+The append-only JSONL remains available for audit, but restored text is
+untrusted context only and never restores a partially completed run,
+permissions, approvals, or verification evidence.
 
 ## One-shot run
 
@@ -229,6 +247,7 @@ Useful options:
 --max-seconds N
 --command-timeout N
 --allow-program NAME
+--session-context-chars N  interactive commands only; 2000..18000
 --json                    one-shot run only
 ```
 
@@ -236,6 +255,9 @@ Run logs and redacted output artifacts are stored under `runs_dir` from the
 user settings file, `CODING_AGENT_RUNS_DIR`, or the default per-user run
 directory, in that order. The CLI prints a neutral run ID rather than an
 absolute local path.
+
+Interactive session logs use `sessions_dir` from user settings,
+`CODING_AGENT_SESSIONS_DIR`, or `~/.coding-agent/sessions`, in that order.
 
 ## Inspect a run
 

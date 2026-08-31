@@ -25,13 +25,15 @@ in effect. `--help` remains available even when the file is malformed.
   "command_timeout": 120,
   "approval_mode": "prompt",
   "allow_programs": ["python"],
-  "runs_dir": "runs"
+  "runs_dir": "runs",
+  "sessions_dir": "sessions",
+  "session_context_chars": 12000
 }
 ```
 
-Relative `runs_dir` values are resolved against the directory containing
-`settings.json`, so the example stores logs under
-`~/.coding-agent/runs`.
+Relative `runs_dir` and `sessions_dir` values are resolved against the
+directory containing `settings.json`, so the example stores both kinds of logs
+under `~/.coding-agent`.
 
 ## Schema
 
@@ -52,6 +54,8 @@ model request.
 | `approval_mode` | `"prompt"` or `"deny"` | `"prompt"` |
 | `allow_programs` | array of PATH-resolved executable names | empty array |
 | `runs_dir` | non-empty absolute or settings-relative path | `CODING_AGENT_RUNS_DIR`, then `~/.coding-agent/runs` |
+| `sessions_dir` | non-empty absolute or settings-relative path | `CODING_AGENT_SESSIONS_DIR`, then `~/.coding-agent/sessions` |
+| `session_context_chars` | integer from 2000 to 18000 | `12000` |
 
 An explicit JSON `null` for `thinking` means “use the provider default” and
 overrides `CODING_AGENT_THINKING`. Other nullable-looking fields must be
@@ -74,6 +78,10 @@ file takes priority over the environment-key fallback.
 Evaluation suites keep their own `allowed_programs` list so an evaluation's
 execution policy stays reproducible; the user-level `allow_programs` field
 applies to `tui` and `run`.
+
+`session_context_chars` applies to `tui` and `resume` and can be overridden by
+`--session-context-chars`. It bounds only restored conversation history; each
+individual agent run retains its own controller-owned prompt and event limits.
 
 ## Security boundary
 

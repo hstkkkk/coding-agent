@@ -11,11 +11,14 @@ from unittest.mock import patch
 from coding_agent.cli import (
     EXIT_CODES,
     _runs_root,
+    _sessions_root,
     _validate_agent_configuration,
     build_parser,
     main,
 )
+from coding_agent.conversation import ConversationStore
 from coding_agent.domain import RunResult, RunStatus
+from coding_agent.events import Redactor
 from coding_agent.settings import SettingsError, UserSettings
 
 
@@ -43,6 +46,44 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(args.command, "tui")
         self.assertEqual(args.workspace, Path.cwd())
+
+    def test_parser_exposes_resume_and_session_listing_commands(self) -> None:
+        session_id = "a" * 32
+
+        resume = build_parser().parse_args(["resume", session_id])
+        sessions = build_parser().parse_args(["sessions"])
+
+        self.assertEqual(resume.command, "resume")
+        self.assertEqual(resume.session_id, session_id)
+        self.assertEqual(resume.workspace, Path.cwd())
+        self.assertEqual(sessions.command, "sessions")
+
+    def test_resume_dispatches_to_interactive_session(self) -> None:
+        session_id = "a" * 32
+
+        with patch("coding_agent.cli._tui", return_value=0) as tui:
+            exit_code = main(["resume", session_id])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(tui.call_args.args[0].session_id, session_id)
+
+    def test_sessions_lists_without_model_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            sessions_root = root / "sessions"
+            session = ConversationStore(sessions_root, Redactor()).create(workspace)
+            stdout = io.StringIO()
+
+            with (
+                patch("coding_agent.cli._sessions_root", return_value=sessions_root),
+                redirect_stdout(stdout),
+            ):
+                exit_code = main(["sessions", "--workspace", str(workspace)])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn(session.session_id, stdout.getvalue())
 
     def test_parser_reads_explicit_thinking_mode_from_environment(self) -> None:
         with patch.dict(
@@ -135,6 +176,18 @@ class CliTests(unittest.TestCase):
                 clear=True,
             ):
                 result = _runs_root(configured)
+
+        self.assertEqual(result, configured.resolve())
+
+    def test_settings_session_directory_overrides_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            configured = Path(directory) / "settings-sessions"
+            with patch.dict(
+                "os.environ",
+                {"CODING_AGENT_SESSIONS_DIR": str(Path(directory) / "environment-sessions")},
+                clear=True,
+            ):
+                result = _sessions_root(configured)
 
         self.assertEqual(result, configured.resolve())
 

@@ -1,4 +1,4 @@
-# Technical design: interactive CLI and Git workspace bootstrap
+# Technical design: resumable interactive CLI and Git workspace bootstrap
 
 ## Design constraints
 
@@ -28,10 +28,14 @@ CLI composition root
   |       |
   |       +--> AgentEngine + model/tools/events/artifacts
   |
+  +--> ConversationStore.create/resume/list
+  |       |
+  |       +--> validated append-only JSONL + deterministic compaction
+  |
   +--> InteractiveSession.run(run_task) -> int
           |
           +--> TerminalPrompt.readline(prompt) -> str
-          +--> terminal input/output + bounded session history
+          +--> ConversationSession.prepare/record/history
 
 AgentEngine event projection
   |
@@ -43,9 +47,9 @@ LocalToolRuntime approval
   +--> PromptApprovalAdapter.request(request) -> ApprovalDecision
 ```
 
-These are deep modules: callers learn one operation while Git recovery,
-per-run composition, command parsing, history bounds, and presentation remain
-local to their implementations.
+These are deep modules: callers learn a small operation set while Git recovery,
+per-run composition, command parsing, durable replay, context bounds, and
+presentation remain local to their implementations.
 
 ## 1. `WorkspaceBootstrap`
 
@@ -154,7 +158,65 @@ The one-shot command maps `SUCCEEDED` and `ANSWERED` to process exit code zero,
 while the distinct status preserves their semantics in events and reports. The
 interactive session records the result and continues regardless of status.
 
-## 3. `InteractiveSession`
+## 3. `ConversationStore` and `ConversationSession`
+
+### Interface
+
+`src/coding_agent/conversation.py` exposes the persistence boundary:
+
+```python
+class ConversationStore:
+    def create(self, workspace: Path) -> ConversationSession: ...
+    def resume(self, session_id: str, workspace: Path) -> ConversationSession: ...
+    def list_sessions(self, *, workspace: Path | None, limit: int) -> tuple[SessionInfo, ...]: ...
+
+class ConversationSession:
+    def prepare(self, request: str) -> PreparedConversation: ...
+    def record(self, request: str, result: RunResult) -> None: ...
+    def history(self, *, limit: int = 20) -> ConversationHistory: ...
+```
+
+The CLI decides where sessions live and supplies a redactor and context limits.
+Callers do not parse logs, manage revisions, choose compaction checkpoints, or
+construct model context themselves.
+
+### Durable format and replay
+
+Each session uses a random lowercase 32-hex ID and an append-only
+`session.jsonl` under the per-user session directory. The first record binds the
+schema, ID, canonical workspace, and creation time. Later `turn` and
+`compaction` records carry contiguous revisions. Replay validates record types,
+field sizes, UTF-8, turn ordering, revision ordering, status values, and an
+overall file-size bound before returning state.
+
+Writes take an operating-system file lock, append one bounded JSON record,
+flush, and `fsync`. The configured API key and credential-shaped values are
+redacted before persistence. A turn stores only the user request, final
+assistant outcome, terminal status, run ID, and changed-path names. It never
+serializes verification records, approval decisions, tool observations,
+controller budgets, or live engine state.
+
+Resume requires the caller's canonical workspace to match the creation record.
+Thus a valid session ID cannot move historical text into a different target
+repository. Completed turns are resumable; a run interrupted before producing
+a `RunResult` is deliberately not checkpointed.
+
+### Automatic context compaction
+
+`prepare` derives a prompt view under a hard character budget. It first keeps
+recent raw turns. If the rendered view exceeds the target, it folds the oldest
+eligible turns into compact structured digests containing bounded request and
+outcome fragments, status, run ID, and changed paths. At least two recent turns
+remain raw by default. The checkpoint is persisted, so another process rebuilds
+the same compacted view without repeating work.
+
+This is deterministic controller compaction, not a recursive model
+summarization call. The prompt wraps both compacted memory and recent turns in a
+warning that restored text is untrusted context only and cannot grant
+permissions, approvals, verification evidence, or repository authority. The
+current request and history are jointly hard-bounded before the model call.
+
+## 4. `InteractiveSession`
 
 ### Interface
 
@@ -166,24 +228,25 @@ class InteractiveSession:
         ...
 ```
 
-The constructor accepts workspace/model labels plus input and output text
-streams. Tests use `StringIO` and a fake `run_task`; production uses the
-terminal and `LocalAgentRunner.run`.
+The constructor accepts a `ConversationSession`, model label, and optional
+input/output streams. Tests use a temporary `ConversationStore`, `StringIO`, and
+a fake `run_task`; production uses the durable session and
+`LocalAgentRunner.run`.
 
 ### Loop
 
 1. Render a compact banner and help hint.
 2. Read one line from `coding-agent> `.
 3. Ignore blanks; dispatch leading `/` commands locally.
-4. Convert a natural-language request plus bounded history into the objective.
+4. Ask `ConversationSession.prepare` for the bounded objective.
 5. Call `run_task` once.
-6. Store an `InteractiveHistoryEntry` and print status/run ID.
+6. Persist the completed `RunResult` through `ConversationSession.record` and
+   print status/run ID.
 7. Continue until `/exit`, `/quit`, or EOF.
 
-History retains at most six entries and at most 4,000 contextual characters.
-Only prior user requests, terminal statuses, run IDs, and changed paths enter
-the next objective. Prior verification IDs and model summaries never carry
-forward. Historical text is labeled as context, not instructions or evidence.
+`/history` reads persisted recent turns and reports how many earlier turns are
+in compacted memory. `/session` prints the resume ID. The banner distinguishes
+new from resumed sessions, and exit prints the exact resume command.
 
 The terminal uses ANSI styling only when output is a TTY and `NO_COLOR` is not
 set. Plain text is the complete fallback, which keeps Windows and redirected
@@ -237,22 +300,31 @@ not the display wrapping, identifies the exact operation.
 
 ## CLI integration
 
-`build_parser` gains an explicit `tui` subcommand with the same workspace,
-model, budget, approval, and allow-program options as `run`, except `task` and
-`--json`.
+`build_parser` exposes `tui` with the same workspace, model, budget, approval,
+and allow-program options as `run`, except `task` and `--json`. It also exposes
+`resume SESSION_ID` with the interactive options and `sessions` for discovery.
 
 `main` normalizes an empty argument list to `tui`, so:
 
 ```text
 coding-agent              -> interactive session in Path.cwd()
 coding-agent tui ...      -> explicit interactive session
+coding-agent resume ID    -> resume in Path.cwd()
+coding-agent sessions     -> list saved sessions without model credentials
 coding-agent run ...      -> one bounded run
 ```
 
 Configuration validation occurs before `prepare_workspace`; a missing model,
 invalid endpoint, invalid budget, or missing API key cannot mutate the target.
-After validation, both `run` and `tui` call the same workspace setup module and
-render its messages. `inspect-run` and `eval` are unchanged.
+For a new TUI, workspace setup precedes session creation. For resume, session
+ID and workspace binding are validated before setup, then the existing Git
+workspace is prepared as a no-op. `sessions` needs neither a model nor API key.
+`inspect-run` and `eval` are unchanged.
+
+Session storage precedence is `sessions_dir` in user settings,
+`CODING_AGENT_SESSIONS_DIR`, then `~/.coding-agent/sessions`. The TUI and resume
+commands accept `--session-context-chars`; the settings field has the same name
+and a validated range of 2,000 through 18,000 characters.
 
 The package remains installable as a console script. Documentation recommends
 a one-time `uv tool install --editable <project>` for users who want bare
@@ -279,6 +351,13 @@ a one-time `uv tool install --editable <project>` for users who want bare
 - Objectives and persisted event strings replace unpaired Unicode surrogates at
   their shared boundary, preventing malformed redirected input from crashing
   UTF-8 logs or reaching the model protocol unchanged.
+- Persistent session IDs are non-path 32-hex values, resume is workspace-bound,
+  and replay rejects malformed, oversized, reordered, or unsupported records.
+- Session text is redacted before append; restored turns are explicitly
+  untrusted and omit approvals, verification evidence, and controller state.
+- Per-session file locking prevents overlapping record writes. Compaction is a
+  bounded deterministic controller transform rather than executable content or
+  an extra privileged model action.
 - A non-mutating answer cannot authorize tools, waive approval, or satisfy a
   coding evaluation; a post-mutation `respond` action is rejected.
 
@@ -302,7 +381,14 @@ added solely for tests.
 
 - bare argument normalization selects `tui`;
 - a natural-language line invokes the runner exactly once;
-- multiple requests produce separate history entries and bounded context;
+- multiple requests produce separate persisted history entries and bounded
+  context;
+- a second `InteractiveSession` can resume the ID and receives both the prior
+  request and assistant outcome;
+- old turns compact automatically, the checkpoint survives replay, and the
+  current request plus context never exceeds the hard objective bound;
+- wrong-workspace and traversal-shaped session IDs are rejected;
+- secrets and verification IDs do not enter session JSONL;
 - slash commands do not invoke the runner;
 - `/` opens a command catalog; arrow keys, filtering, Backspace, Escape, Enter,
   Unicode input, and redirected line mode behave deterministically;
@@ -321,7 +407,10 @@ added solely for tests.
 ### Regression and smoke checks
 
 - existing CLI, engine, tool, integration, and evaluation unit tests;
-- one-shot `run --help`, explicit `tui --help`, and bare TUI exit smoke tests;
+- one-shot `run --help`, explicit `tui --help`, `resume --help`, session listing,
+  and bare TUI exit smoke tests;
+- a two-process resume smoke test confirms model-visible conversation
+  continuity while each turn still creates an independent run;
 - automatic initialization smoke test in a temporary non-Git directory;
 - `git diff --check` and a final repository status inspection.
 

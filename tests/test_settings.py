@@ -62,6 +62,8 @@ class UserSettingsTests(unittest.TestCase):
                         "approval_mode": "deny",
                         "allow_programs": ["Python", "python", "git.exe"],
                         "runs_dir": "run-data",
+                        "sessions_dir": "session-data",
+                        "session_context_chars": 12_000,
                     }
                 ),
                 encoding="utf-8",
@@ -81,6 +83,8 @@ class UserSettingsTests(unittest.TestCase):
         self.assertEqual(settings.approval_mode, "deny")
         self.assertEqual(settings.allow_programs, ("Python", "git.exe"))
         self.assertEqual(settings.runs_dir, (root / "run-data").resolve())
+        self.assertEqual(settings.sessions_dir, (root / "session-data").resolve())
+        self.assertEqual(settings.session_context_chars, 12_000)
         self.assertNotIn("test-secret-value", repr(settings))
 
     def test_malformed_json_does_not_echo_file_contents(self) -> None:
@@ -118,6 +122,8 @@ class UserSettingsTests(unittest.TestCase):
             "approval_mode": "ask",
             "allow_programs": ["../python"],
             "runs_dir": "",
+            "sessions_dir": [],
+            "session_context_chars": 999,
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "settings.json"

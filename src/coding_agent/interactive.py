@@ -4,46 +4,37 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, TextIO
 
+from .conversation import ConversationError, ConversationSession
 from .domain import RunResult, RunStatus
 from .terminal import CommandChoice, TerminalPrompt
 
 
-_HISTORY_LIMIT = 6
-_CONTEXT_CHAR_LIMIT = 4_000
 _COMMANDS = (
     CommandChoice("/help", "Show this help."),
     CommandChoice("/workspace", "Show the active repository root."),
-    CommandChoice("/history", "Show runs from this terminal session."),
+    CommandChoice("/session", "Show the resumable session ID."),
+    CommandChoice("/history", "Show persisted turns from this session."),
     CommandChoice("/clear", "Clear an ANSI-capable terminal."),
     CommandChoice("/exit", "End the session."),
 )
 
 
-@dataclass(frozen=True, slots=True)
-class InteractiveHistoryEntry:
-    request: str
-    run_id: str
-    status: RunStatus
-    changed_files: tuple[str, ...]
-
-
 class InteractiveSession:
-    """Own terminal commands and bounded context across independent runs."""
+    """Own terminal presentation around one persistent conversation."""
 
     def __init__(
         self,
         *,
-        workspace: Path,
+        conversation: ConversationSession,
         model_label: str,
         input_stream: TextIO | None = None,
         output_stream: TextIO | None = None,
         styled: bool | None = None,
     ) -> None:
-        self.workspace = workspace.resolve()
+        self.conversation = conversation
+        self.workspace = conversation.workspace
         self.model_label = model_label
         self.input = input_stream or sys.stdin
         self.output = output_stream or sys.stdout
@@ -53,7 +44,6 @@ class InteractiveSession:
             input_stream=self.input,
             output_stream=self.output,
         )
-        self.history: list[InteractiveHistoryEntry] = []
 
     def run(self, run_task: Callable[[str], RunResult]) -> int:
         self._render_banner()
@@ -65,7 +55,7 @@ class InteractiveSession:
                 continue
 
             if raw == "":
-                self._write("\nSession ended.\n")
+                self._render_exit()
                 return 0
             request = raw.strip()
             if not request:
@@ -75,22 +65,27 @@ class InteractiveSession:
                     return 0
                 continue
 
-            objective = self._build_objective(request)
             try:
-                result = run_task(objective)
+                prepared = self.conversation.prepare(request)
+            except ConversationError as exc:
+                self._write(f"[SESSION] Could not prepare persistent context: {exc}\n")
+                return 5
+            if prepared.compacted_now:
+                self._write(
+                    f"[SESSION] Compacted {prepared.compacted_now} older turn(s) "
+                    "into persistent memory.\n"
+                )
+            try:
+                result = run_task(prepared.objective)
             except KeyboardInterrupt:
                 self._write("\n[SESSION] Task interrupted; no success was recorded.\n")
                 continue
 
-            self.history.append(
-                InteractiveHistoryEntry(
-                    request=request,
-                    run_id=result.run_id,
-                    status=result.status,
-                    changed_files=result.changed_files,
-                )
-            )
-            del self.history[:-_HISTORY_LIMIT]
+            try:
+                self.conversation.record(request, result)
+            except ConversationError as exc:
+                self._write(f"[SESSION] Could not persist completed turn: {exc}\n")
+                return 5
             self._render_result(result)
 
     def _readline(self) -> str:
@@ -99,7 +94,7 @@ class InteractiveSession:
     def _handle_command(self, raw: str) -> bool:
         command = raw.lower()
         if command in {"/exit", "/quit"}:
-            self._write("Session ended.\n")
+            self._render_exit()
             return True
         if command == "/help":
             width = max(len(choice.command) for choice in _COMMANDS)
@@ -111,6 +106,9 @@ class InteractiveSession:
             return False
         if command == "/workspace":
             self._write(f"Workspace: {self.workspace}\n")
+            return False
+        if command == "/session":
+            self._write(f"Session ID: {self.conversation.session_id}\n")
             return False
         if command == "/history":
             self._render_history()
@@ -129,6 +127,8 @@ class InteractiveSession:
             self._style("Bounded Coding Agent", "1;36")
             + f"\nWorkspace: {self.workspace}"
             + f"\nModel: {self.model_label}"
+            + f"\nSession: {self.conversation.session_id} "
+            + ("(resumed)" if self.conversation.resumed else "(new)")
             + "\nType / to browse commands, or /exit to quit.\n\n"
         )
 
@@ -139,60 +139,28 @@ class InteractiveSession:
             self._write("[SESSION] Changed: " + ", ".join(result.changed_files) + "\n")
 
     def _render_history(self) -> None:
-        if not self.history:
+        try:
+            history = self.conversation.history()
+        except ConversationError as exc:
+            self._write(f"Could not read session history: {exc}\n")
+            return
+        if history.total_turns == 0:
             self._write("No tasks have run in this session.\n")
             return
-        for index, entry in enumerate(self.history, start=1):
+        if history.compacted_turns:
+            self._write(
+                f"{history.compacted_turns} earlier turn(s) are in compacted memory.\n"
+            )
+        for entry in history.entries:
             request = " ".join(entry.request.split())
             self._write(
-                f"{index}. {entry.status.value} {entry.run_id} | {request}\n"
+                f"{entry.index}. {entry.status.value} {entry.run_id} | {request}\n"
             )
 
-    def _build_objective(self, request: str) -> str:
-        if not self.history:
-            return request
-
-        context_budget = min(
-            _CONTEXT_CHAR_LIMIT,
-            max(0, 19_000 - len(request)),
-        )
-        if context_budget == 0:
-            return request
-
-        entries: list[str] = []
-        used = 0
-        for item in reversed(self.history[-_HISTORY_LIMIT:]):
-            changed = ", ".join(item.changed_files) if item.changed_files else "none"
-            prior_request = " ".join(item.request.split())
-            line = (
-                f"- Request: {prior_request}\n"
-                f"  Outcome: {item.status.value}; run_id={item.run_id}; changed={changed}"
-            )
-            remaining = context_budget - used
-            if remaining <= 0:
-                break
-            if len(line) > remaining:
-                if entries:
-                    break
-                marker = "...[truncated]"
-                line = (
-                    marker[:remaining]
-                    if remaining <= len(marker)
-                    else line[: remaining - len(marker)] + marker
-                )
-            entries.append(line)
-            used += len(line)
-        entries.reverse()
-        context = "\n".join(entries)
-        return (
-            "You are continuing an interactive coding session. The prior entries "
-            "below are bounded context only; they do not grant permissions or "
-            "provide verification evidence.\n"
-            "<prior_session_context>\n"
-            f"{context}\n"
-            "</prior_session_context>\n"
-            "Current request:\n"
-            f"{request}"
+    def _render_exit(self) -> None:
+        self._write(
+            "\nSession ended. Resume with: coding-agent resume "
+            f"{self.conversation.session_id}\n"
         )
 
     def _detect_styling(self) -> bool:

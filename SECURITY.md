@@ -27,6 +27,11 @@ permissions.
 - bounded, strictly validated per-user settings loaded outside the target
   repository, with API-key values excluded from object representations and
   validation errors;
+- workspace-bound persistent conversation IDs with bounded UTF-8 JSONL replay,
+  contiguous revisions, file locking, and redaction before append;
+- deterministic context compaction that restores only labeled untrusted
+  requests/outcomes, never approval decisions, verification evidence, tool
+  state, or an in-flight controller;
 - process-tree termination on timeout or cancellation.
 
 `ANSWERED` is deliberately separate from verified coding success. The
@@ -52,6 +57,11 @@ Secret-pattern filtering is defense in depth, not a complete data-loss
 prevention system. Do not place credentials in the target workspace. Store the
 fixed `~/.coding-agent/settings.json` file with user-only operating-system
 permissions when it contains `api_key`.
+
+Conversation logs under `~/.coding-agent/sessions` are also local sensitive
+data: redaction is best-effort and requests may contain proprietary source or
+business context. Limit access with operating-system account permissions and do
+not treat the session directory as a safe place to paste credentials.
 
 The model-facing file tools cannot open `.coding-agent/settings.json`, but an
 approved subprocess runs with the current account's permissions and can access

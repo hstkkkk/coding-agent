@@ -25,6 +25,8 @@ _KNOWN_FIELDS = frozenset(
         "approval_mode",
         "allow_programs",
         "runs_dir",
+        "sessions_dir",
+        "session_context_chars",
     }
 )
 
@@ -48,6 +50,8 @@ class UserSettings:
     approval_mode: str | None = None
     allow_programs: tuple[str, ...] = ()
     runs_dir: Path | None = None
+    sessions_dir: Path | None = None
+    session_context_chars: int | None = None
     provided_fields: frozenset[str] = field(
         default_factory=frozenset,
         repr=False,
@@ -120,7 +124,14 @@ def load_user_settings(path: Path | None = None) -> UserSettings:
         command_timeout=_optional_integer(raw, "command_timeout", 1, 600),
         approval_mode=_optional_choice(raw, "approval_mode", {"prompt", "deny"}),
         allow_programs=_optional_programs(raw),
-        runs_dir=_optional_runs_dir(raw, settings_path.parent),
+        runs_dir=_optional_directory(raw, "runs_dir", settings_path.parent),
+        sessions_dir=_optional_directory(raw, "sessions_dir", settings_path.parent),
+        session_context_chars=_optional_integer(
+            raw,
+            "session_context_chars",
+            2_000,
+            18_000,
+        ),
         provided_fields=frozenset(raw),
     )
 
@@ -222,8 +233,12 @@ def _optional_programs(raw: dict[str, Any]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _optional_runs_dir(raw: dict[str, Any], base_directory: Path) -> Path | None:
-    value = _optional_string(raw, "runs_dir")
+def _optional_directory(
+    raw: dict[str, Any],
+    field_name: str,
+    base_directory: Path,
+) -> Path | None:
+    value = _optional_string(raw, field_name)
     if value is None:
         return None
     candidate = Path(value).expanduser()
@@ -232,4 +247,4 @@ def _optional_runs_dir(raw: dict[str, Any], base_directory: Path) -> Path | None
     try:
         return candidate.resolve()
     except OSError as exc:
-        raise SettingsError("settings field 'runs_dir' is not a valid path") from exc
+        raise SettingsError(f"settings field '{field_name}' is not a valid path") from exc

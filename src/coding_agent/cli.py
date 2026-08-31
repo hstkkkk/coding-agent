@@ -11,6 +11,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import __version__
+from .conversation import (
+    ConversationError,
+    ConversationLimits,
+    ConversationStore,
+)
 from .context import SYSTEM_PROMPT
 from .domain import RunOptions, RunStatus
 from .evaluation import EvaluationConfig, load_suite, run_evaluation
@@ -49,6 +54,23 @@ def build_parser(settings: UserSettings | None = None) -> argparse.ArgumentParse
 
     tui_parser = subparsers.add_parser("tui", help="open an interactive terminal session")
     _add_agent_arguments(tui_parser, settings, include_json=False)
+    _add_session_arguments(tui_parser, settings)
+    tui_parser.set_defaults(session_id=None)
+
+    resume_parser = subparsers.add_parser(
+        "resume",
+        help="resume a persisted interactive session",
+    )
+    resume_parser.add_argument("session_id")
+    _add_agent_arguments(resume_parser, settings, include_json=False)
+    _add_session_arguments(resume_parser, settings)
+
+    sessions_parser = subparsers.add_parser(
+        "sessions",
+        help="list persisted interactive sessions",
+    )
+    sessions_parser.add_argument("--workspace", type=Path)
+    sessions_parser.add_argument("--limit", type=int, default=20)
 
     run_parser = subparsers.add_parser("run", help="run one coding task")
     run_parser.add_argument("task", help="natural-language task objective")
@@ -65,6 +87,7 @@ def build_parser(settings: UserSettings | None = None) -> argparse.ArgumentParse
     parser.set_defaults(
         user_settings=settings,
         configured_runs_dir=settings.runs_dir,
+        configured_sessions_dir=settings.sessions_dir,
         configured_allow_programs=settings.allow_programs,
     )
     return parser
@@ -147,6 +170,23 @@ def _add_execution_arguments(
     )
 
 
+def _add_session_arguments(
+    parser: argparse.ArgumentParser,
+    settings: UserSettings,
+) -> None:
+    parser.add_argument(
+        "--session-context-chars",
+        type=int,
+        default=_configured_value(
+            settings,
+            "session_context_chars",
+            default=12_000,
+        ),
+        metavar="N",
+        help="maximum persisted-history characters sent with each request",
+    )
+
+
 def _configured_value(
     settings: UserSettings,
     field_name: str,
@@ -176,13 +216,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "tui":
             return _tui(args)
+        if args.command == "resume":
+            return _tui(args)
+        if args.command == "sessions":
+            return _sessions(args)
         if args.command == "run":
             return _run(args)
         if args.command == "inspect-run":
             return _inspect_run(args)
         if args.command == "eval":
             return _eval(args)
-    except (ConfigurationError, OSError) as exc:
+    except (ConfigurationError, ConversationError, OSError) as exc:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 5
     return 5
@@ -205,14 +249,45 @@ def _run(args: argparse.Namespace) -> int:
 
 def _tui(args: argparse.Namespace) -> int:
     api_key = _validate_agent_configuration(args)
-    setup = _prepare_agent_workspace(args.workspace)
+    _validate_session_context_chars(args.session_context_chars)
+    store = ConversationStore(
+        _sessions_root(args.configured_sessions_dir),
+        Redactor([api_key]),
+        limits=_conversation_limits(args.session_context_chars),
+    )
+    if args.session_id is not None:
+        conversation = store.resume(args.session_id, args.workspace)
+        setup = _prepare_agent_workspace(conversation.workspace)
+    else:
+        setup = _prepare_agent_workspace(args.workspace)
+        conversation = store.create(setup.workspace)
     _render_workspace_setup(setup, json_output=False)
     runner = _build_local_runner(args, setup.workspace, api_key, json_output=False)
     session = InteractiveSession(
-        workspace=setup.workspace,
+        conversation=conversation,
         model_label=args.model,
     )
     return session.run(runner.run)
+
+
+def _sessions(args: argparse.Namespace) -> int:
+    if not 1 <= args.limit <= 100:
+        raise ConfigurationError("--limit must be between 1 and 100")
+    store = ConversationStore(
+        _sessions_root(args.configured_sessions_dir),
+        Redactor(),
+    )
+    sessions = store.list_sessions(workspace=args.workspace, limit=args.limit)
+    if not sessions:
+        print("No persisted sessions found.")
+        return 0
+    for session in sessions:
+        print(
+            f"{session.session_id}  {session.updated_at}  "
+            f"turns={session.turn_count} compacted={session.compacted_turns}  "
+            f"{session.workspace}"
+        )
+    return 0
 
 
 def _prepare_agent_workspace(path: Path) -> WorkspaceSetupResult:
@@ -402,6 +477,22 @@ def _runs_root(configured_path: Path | None = None) -> Path:
     return (Path.home() / ".coding-agent" / "runs").resolve()
 
 
+def _sessions_root(configured_path: Path | None = None) -> Path:
+    if configured_path is not None:
+        return configured_path.expanduser().resolve()
+    configured = os.environ.get("CODING_AGENT_SESSIONS_DIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (Path.home() / ".coding-agent" / "sessions").resolve()
+
+
+def _conversation_limits(max_context_chars: int) -> ConversationLimits:
+    return ConversationLimits(
+        max_context_chars=max_context_chars,
+        target_context_chars=max(1_000, max_context_chars * 2 // 3),
+    )
+
+
 def _prompt_hash() -> str:
     import hashlib
 
@@ -417,6 +508,13 @@ def _validate_base_url(value: str) -> None:
 def _validate_thinking(value: str | None) -> None:
     if value not in {None, "enabled", "disabled"}:
         raise ConfigurationError("thinking mode must be enabled or disabled")
+
+
+def _validate_session_context_chars(value: int) -> None:
+    if not 2_000 <= value <= 18_000:
+        raise ConfigurationError(
+            "--session-context-chars must be between 2000 and 18000"
+        )
 
 
 if __name__ == "__main__":
