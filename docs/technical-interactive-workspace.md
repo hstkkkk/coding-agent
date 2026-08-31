@@ -276,6 +276,9 @@ a one-time `uv tool install --editable <project>` for users who want bare
   redacted and still bound to the original operation digest.
 - Console progress escapes control characters supplied through model arguments
   and bounds every free-form field.
+- Objectives and persisted event strings replace unpaired Unicode surrogates at
+  their shared boundary, preventing malformed redirected input from crashing
+  UTF-8 logs or reaching the model protocol unchanged.
 - A non-mutating answer cannot authorize tools, waive approval, or satisfy a
   coding evaluation; a post-mutation `respond` action is rejected.
 

@@ -112,12 +112,19 @@ class AgentEngineTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def run_engine(self, responses, *, options: RunOptions | None = None, clock=None):
+    def run_engine(
+        self,
+        responses,
+        *,
+        options: RunOptions | None = None,
+        clock=None,
+        objective: str = "fix the bug",
+    ):
         model = ScriptedModelAdapter(responses)
         tools = FakeToolRuntime()
         events = InMemoryEventSink()
         engine = AgentEngine(model=model, tools=tools, events=events, options=options, clock=clock)
-        result = engine.run(TaskRequest("fix the bug", self.workspace))
+        result = engine.run(TaskRequest(objective, self.workspace))
         return result, model, tools, events
 
     def test_success_requires_fresh_cited_verification(self) -> None:
@@ -144,6 +151,21 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual(tools.calls, [])
         self.assertEqual(events.events[-1].data["status"], "ANSWERED")
         self.assertIn("respond", {tool.name for tool in model.requests[0].tools})
+
+    def test_objective_replaces_unpaired_surrogates_before_model_request(self) -> None:
+        malformed = "Who are you?" + chr(0xDC81)
+
+        def answer_from_clean_context(request) -> AssistantTurn:
+            self.assertNotIn(chr(0xDC81), request.user_prompt)
+            self.assertIn("\N{REPLACEMENT CHARACTER}", request.user_prompt)
+            return AssistantTurn("answer", AnswerRequest("answer", "A coding agent."))
+
+        result, _, _, _ = self.run_engine(
+            [answer_from_clean_context],
+            objective=malformed,
+        )
+
+        self.assertEqual(result.status, RunStatus.ANSWERED)
 
     def test_answer_is_rejected_after_workspace_mutation(self) -> None:
         result, _, tools, events = self.run_engine(

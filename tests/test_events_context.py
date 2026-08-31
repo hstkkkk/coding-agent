@@ -99,6 +99,27 @@ class EventAndContextTests(unittest.TestCase):
             self.assertIn("REDACTED", encoded)
             json.loads(encoded)
 
+    def test_jsonl_replaces_unpaired_surrogates_before_utf8_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            sink = JsonlEventSink(path, Redactor())
+            malformed = "broken" + chr(0xDC81)
+
+            sink.emit(
+                RunEvent(
+                    run_id="run",
+                    sequence=1,
+                    kind="test",
+                    timestamp="now",
+                    data={"text": malformed},
+                )
+            )
+
+            encoded = path.read_text(encoding="utf-8")
+            self.assertNotIn(chr(0xDC81), encoded)
+            self.assertIn("\N{REPLACEMENT CHARACTER}", encoded)
+            json.loads(encoded)
+
     def test_artifact_ids_cannot_escape_store(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ArtifactStore(Path(directory), Redactor())

@@ -17,6 +17,8 @@ permissions.
 - filtered child-process environment without the model API key;
 - bounded model turns, process time, file reads, search results, and outputs;
 - best-effort secret redaction before content reaches logs or model context;
+- replacement of unpaired Unicode surrogates before model-request and UTF-8
+  event-log boundaries;
 - bounded progress descriptions that omit file contents, script bodies, search
   strings, and raw command arguments;
 - read-only Git tools and rejection of common Git history/write operations;

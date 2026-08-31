@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable
 
-from .domain import EventSink, RunEvent
+from .domain import EventSink, RunEvent, replace_unpaired_surrogates
 
 
 class Redactor:
@@ -34,7 +34,7 @@ class Redactor:
         )
 
     def text(self, value: str) -> str:
-        redacted = value
+        redacted = replace_unpaired_surrogates(value)
         for secret in self._known:
             redacted = redacted.replace(secret, "[REDACTED_SECRET]")
         redacted = self._TOKEN_PATTERN.sub("[REDACTED_TOKEN]", redacted)

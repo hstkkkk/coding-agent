@@ -41,6 +41,7 @@ from .domain import (
     VerificationRecord,
     action_arguments,
     action_name,
+    replace_unpaired_surrogates,
 )
 from .events import EventEmitter
 from .presentation import describe_tool, describe_tool_result
@@ -134,7 +135,7 @@ class AgentEngine:
         emitter = EventEmitter(run_id, self.events)
         state = RunState(
             run_id=run_id,
-            objective=request.objective.strip(),
+            objective=replace_unpaired_surrogates(request.objective.strip()),
             workspace=request.workspace.resolve(),
         )
         started = self.clock.monotonic()

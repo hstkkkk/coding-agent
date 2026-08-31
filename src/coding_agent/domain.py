@@ -337,3 +337,16 @@ def string_tuple(value: Any, label: str) -> tuple[str, ...]:
     if not all(isinstance(item, str) for item in value):
         raise ModelProtocolError(f"{label} must contain only strings")
     return tuple(value)
+
+
+def replace_unpaired_surrogates(value: str) -> str:
+    """Return Unicode scalar text that is safe for UTF-8 and JSON boundaries."""
+
+    if not any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+        return value
+    return "".join(
+        "\N{REPLACEMENT CHARACTER}"
+        if 0xD800 <= ord(character) <= 0xDFFF
+        else character
+        for character in value
+    )
