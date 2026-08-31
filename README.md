@@ -63,9 +63,46 @@ No runtime dependency other than Python's standard library is installed.
 
 ## Configure
 
-Set the API key and model through environment variables. The key is used only
-by the controller and is removed from the environment inherited by tool
-processes.
+Create the fixed per-user configuration file:
+
+```text
+C:\Users\<you>\.coding-agent\settings.json
+```
+
+The cross-platform path is `~/.coding-agent/settings.json`. A typical
+DeepSeek-compatible configuration is:
+
+```json
+{
+  "api_key": "<your-api-key>",
+  "model": "deepseek-v4-flash",
+  "base_url": "https://api.deepseek.com",
+  "thinking": "disabled",
+  "max_turns": 30,
+  "max_seconds": 900,
+  "command_timeout": 120,
+  "approval_mode": "prompt",
+  "allow_programs": ["python"]
+}
+```
+
+The file must be a UTF-8 JSON object and is strictly validated. Keep it outside
+repositories, do not commit it, and restrict access to your user account
+because `api_key` is stored as plain text. The key is used only by the
+controller, redacted from saved output, and omitted from tool-process
+environments.
+
+Configuration precedence is:
+
+```text
+explicit command-line option > user settings file > environment variable > built-in default
+```
+
+An explicit `api_key` in the file is preferred over an environment key. To
+keep the secret in an environment variable instead, omit `api_key` and set
+`api_key_env` to its variable name; the default name is `OPENAI_API_KEY`.
+
+Environment variables remain supported as a fallback:
 
 PowerShell:
 
@@ -88,7 +125,8 @@ export CODING_AGENT_THINKING="disabled"
 
 `CODING_AGENT_THINKING` accepts `enabled` or `disabled`. Leave it unset to
 preserve the provider default. The equivalent command-line option is
-`--thinking enabled|disabled`.
+`--thinking enabled|disabled`. See [docs/configuration.md](docs/configuration.md)
+for the complete schema, ranges, precedence rules, and security notes.
 
 ## Interactive terminal
 
@@ -161,9 +199,10 @@ Useful options:
 --json                    one-shot run only
 ```
 
-Run logs and redacted output artifacts are stored under
-`CODING_AGENT_RUNS_DIR`, or under the default per-user run directory. The CLI
-prints a neutral run ID rather than an absolute local path.
+Run logs and redacted output artifacts are stored under `runs_dir` from the
+user settings file, `CODING_AGENT_RUNS_DIR`, or the default per-user run
+directory, in that order. The CLI prints a neutral run ID rather than an
+absolute local path.
 
 ## Inspect a run
 

@@ -27,6 +27,11 @@ commands, presentation, and bounded history. It supplies recent outcomes only
 as labeled context; the repository remains authoritative and every request
 crosses the same `LocalAgentRunner` interface.
 
+`load_user_settings(path) -> UserSettings` is the per-user configuration
+boundary. It owns the fixed path, bounded UTF-8 JSON decoding, complete schema
+validation, relative run-directory resolution, and secret-safe errors. The CLI
+receives only the validated immutable value object.
+
 Internal seams have at least production and test adapters:
 
 | Seam | Production adapter | Test adapter |
@@ -37,9 +42,23 @@ Internal seams have at least production and test adapters:
 | Events | JSONL/console | in-memory sink |
 | Clock | system clock | virtual clock |
 | Terminal | stdio with optional ANSI styling | injected text streams |
+| User settings | fixed per-user JSON file | temporary JSON file or value object |
 
 Vendor responses, subprocess objects, and CLI rendering do not enter the core
 data model.
+
+## Configuration startup
+
+Normal commands load `~/.coding-agent/settings.json` before workspace setup.
+Explicit CLI values override file values; file values override compatible
+environment variables; built-in defaults apply last. The file is optional, but
+when present it must be a JSON object using only the documented fields and must
+fit within 64 KiB. Help output bypasses loading so a malformed file cannot hide
+the repair instructions.
+
+The direct API key is carried only into the model adapter and redactor. It is
+not rendered in configuration errors or object representations and does not
+enter the model-visible context or the allowlisted subprocess environment.
 
 ## Workspace startup
 
@@ -89,10 +108,10 @@ read_output     search_output
 ```
 
 Filesystem paths are workspace-relative. The implementation resolves traversal,
-symbolic links, and junctions before checking containment. Direct `.git` and
-likely credential-file access is rejected. Edits require both an expected file
-hash and exactly one matching old-text fragment; writes use a temporary file
-and atomic replacement.
+symbolic links, and junctions before checking containment. Direct `.git`,
+`.coding-agent`, and likely credential-file access is rejected. Edits require
+both an expected file hash and exactly one matching old-text fragment; writes
+use a temporary file and atomic replacement.
 
 Commands use a program-plus-argument array with `shell=False`. They receive a
 small environment allowlist that excludes the model API key. Command execution
@@ -162,5 +181,6 @@ Oracle is counted explicitly as a false success.
 - UTF-8 text editing only;
 - optimized for small repositories and bounded tasks;
 - heuristic secret detection can have false negatives;
-- one OpenAI-compatible chat-completions adapter in the first release.
+- one OpenAI-compatible chat-completions adapter in the first release;
+- one fixed per-user settings file with no project-local configuration layers.
 

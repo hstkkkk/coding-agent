@@ -77,14 +77,24 @@ class LocalToolRuntimeTests(unittest.TestCase):
 
     def test_rejects_path_escape_and_sensitive_file(self) -> None:
         (self.workspace / ".env").write_text("TOKEN=value", encoding="utf-8")
+        (self.workspace / ".coding-agent").mkdir()
+        (self.workspace / ".coding-agent" / "settings.json").write_text(
+            '{"api_key":"workspace-secret"}',
+            encoding="utf-8",
+        )
 
         escaped = self.execute("read_file", {"path": "../outside.txt"})
         sensitive = self.execute("read_file", {"path": ".env"})
         git_config = self.execute("read_file", {"path": ".git/config"})
+        user_settings = self.execute(
+            "read_file",
+            {"path": ".coding-agent/settings.json"},
+        )
 
         self.assertEqual(escaped.error_code, ErrorCode.POLICY_DENIED)
         self.assertEqual(sensitive.error_code, ErrorCode.POLICY_DENIED)
         self.assertEqual(git_config.error_code, ErrorCode.POLICY_DENIED)
+        self.assertEqual(user_settings.error_code, ErrorCode.POLICY_DENIED)
 
     def test_command_nonzero_is_completed_and_does_not_inherit_api_key(self) -> None:
         arguments = {

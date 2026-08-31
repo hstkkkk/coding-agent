@@ -13,11 +13,16 @@ from urllib.parse import urlparse
 from . import __version__
 from .context import SYSTEM_PROMPT
 from .domain import RunOptions, RunStatus
+from .evaluation import EvaluationConfig, load_suite, run_evaluation
 from .events import Redactor
 from .interactive import InteractiveSession
 from .local_runner import LocalAgentRunner, LocalRunSettings
 from .model import OpenAICompatibleAdapter
-from .evaluation import EvaluationConfig, load_suite, run_evaluation
+from .settings import (
+    SettingsError,
+    UserSettings,
+    load_user_settings,
+)
 from .workspace import WorkspaceSetupError, WorkspaceSetupResult, prepare_workspace
 
 
@@ -33,7 +38,8 @@ class ConfigurationError(ValueError):
     pass
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(settings: UserSettings | None = None) -> argparse.ArgumentParser:
+    settings = settings or UserSettings()
     parser = argparse.ArgumentParser(
         prog="coding-agent",
         description="Run a bounded coding agent in one local Git workspace.",
@@ -41,11 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     tui_parser = subparsers.add_parser("tui", help="open an interactive terminal session")
-    _add_agent_arguments(tui_parser, include_json=False)
+    _add_agent_arguments(tui_parser, settings, include_json=False)
 
     run_parser = subparsers.add_parser("run", help="run one coding task")
     run_parser.add_argument("task", help="natural-language task objective")
-    _add_agent_arguments(run_parser, include_json=True)
+    _add_agent_arguments(run_parser, settings, include_json=True)
 
     inspect_parser = subparsers.add_parser("inspect-run", help="show a saved run log")
     inspect_parser.add_argument("run_id")
@@ -53,56 +59,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     eval_parser = subparsers.add_parser("eval", help="run a repeatable local evaluation suite")
     eval_parser.add_argument("--suite", type=Path, required=True)
-    eval_parser.add_argument("--model", default=os.environ.get("CODING_AGENT_MODEL"))
-    eval_parser.add_argument(
-        "--base-url",
-        default=os.environ.get("CODING_AGENT_BASE_URL", "https://api.openai.com/v1"),
-    )
-    eval_parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
-    eval_parser.add_argument(
-        "--thinking",
-        choices=("enabled", "disabled"),
-        default=os.environ.get("CODING_AGENT_THINKING"),
-        help="explicit provider thinking mode; omitted uses the provider default",
-    )
+    _add_execution_arguments(eval_parser, settings)
     eval_parser.add_argument("--repetitions", type=int)
-    eval_parser.add_argument("--max-turns", type=int, default=30)
-    eval_parser.add_argument("--max-seconds", type=int, default=900)
-    eval_parser.add_argument("--command-timeout", type=int, default=120)
+    parser.set_defaults(
+        user_settings=settings,
+        configured_runs_dir=settings.runs_dir,
+        configured_allow_programs=settings.allow_programs,
+    )
     return parser
 
 
 def _add_agent_arguments(
     parser: argparse.ArgumentParser,
+    settings: UserSettings,
     *,
     include_json: bool,
 ) -> None:
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
-    parser.add_argument("--model", default=os.environ.get("CODING_AGENT_MODEL"))
-    parser.add_argument(
-        "--base-url",
-        default=os.environ.get("CODING_AGENT_BASE_URL", "https://api.openai.com/v1"),
-    )
-    parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
-    parser.add_argument(
-        "--thinking",
-        choices=("enabled", "disabled"),
-        default=os.environ.get("CODING_AGENT_THINKING"),
-        help="explicit provider thinking mode; omitted uses the provider default",
-    )
-    parser.add_argument("--max-turns", type=int, default=30)
-    parser.add_argument("--max-seconds", type=int, default=900)
-    parser.add_argument("--command-timeout", type=int, default=120)
+    _add_execution_arguments(parser, settings)
     parser.add_argument(
         "--approval-mode",
         choices=("prompt", "deny"),
-        default="prompt",
+        default=_configured_value(settings, "approval_mode", default="prompt"),
         help="how to handle commands and deletions not pre-authorized at startup",
     )
     parser.add_argument(
         "--allow-program",
         action="append",
-        default=[],
+        default=None,
         metavar="NAME",
         help="pre-authorize one PATH-resolved executable name; may be repeated",
     )
@@ -110,11 +94,83 @@ def _add_agent_arguments(
         parser.add_argument("--json", action="store_true", help="emit JSONL progress")
 
 
+def _add_execution_arguments(
+    parser: argparse.ArgumentParser,
+    settings: UserSettings,
+) -> None:
+    parser.add_argument(
+        "--model",
+        default=_configured_value(
+            settings,
+            "model",
+            environment_name="CODING_AGENT_MODEL",
+        ),
+    )
+    parser.add_argument(
+        "--base-url",
+        default=_configured_value(
+            settings,
+            "base_url",
+            environment_name="CODING_AGENT_BASE_URL",
+            default="https://api.openai.com/v1",
+        ),
+    )
+    parser.add_argument(
+        "--api-key-env",
+        default=_configured_value(settings, "api_key_env", default="OPENAI_API_KEY"),
+    )
+    parser.add_argument(
+        "--thinking",
+        choices=("enabled", "disabled"),
+        default=_configured_value(
+            settings,
+            "thinking",
+            environment_name="CODING_AGENT_THINKING",
+        ),
+        help="explicit provider thinking mode; omitted uses the provider default",
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=_configured_value(settings, "max_turns", default=30),
+    )
+    parser.add_argument(
+        "--max-seconds",
+        type=int,
+        default=_configured_value(settings, "max_seconds", default=900),
+    )
+    parser.add_argument(
+        "--command-timeout",
+        type=int,
+        default=_configured_value(settings, "command_timeout", default=120),
+    )
+
+
+def _configured_value(
+    settings: UserSettings,
+    field_name: str,
+    *,
+    environment_name: str | None = None,
+    default: object = None,
+) -> object:
+    value = getattr(settings, field_name)
+    if settings.provides(field_name) or value is not None:
+        return value
+    if environment_name is not None:
+        return os.environ.get(environment_name, default)
+    return default
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments:
         arguments = ["tui"]
+    try:
+        settings = UserSettings() if _requests_help(arguments) else load_user_settings()
+    except SettingsError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
+        return 5
+    parser = build_parser(settings)
     args = parser.parse_args(arguments)
     try:
         if args.command == "tui":
@@ -129,6 +185,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 5
     return 5
+
+
+def _requests_help(arguments: list[str]) -> bool:
+    return any(argument in {"-h", "--help"} for argument in arguments)
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -195,8 +255,12 @@ def _build_local_runner(
             thinking=args.thinking,
             options=options,
             approval_mode=args.approval_mode,
-            allowed_programs=frozenset(args.allow_program),
-            runs_root=_runs_root(),
+            allowed_programs=frozenset(
+                args.allow_program
+                if args.allow_program is not None
+                else args.configured_allow_programs
+            ),
+            runs_root=_runs_root(args.configured_runs_dir),
             run_metadata=metadata,
             json_output=json_output,
         )
@@ -205,7 +269,10 @@ def _build_local_runner(
 
 def _validate_agent_configuration(args: argparse.Namespace) -> str:
     if not args.model:
-        raise ConfigurationError("set --model or CODING_AGENT_MODEL")
+        raise ConfigurationError(
+            "set --model, 'model' in ~/.coding-agent/settings.json, "
+            "or CODING_AGENT_MODEL"
+        )
     _validate_base_url(args.base_url)
     _validate_thinking(args.thinking)
     if args.max_turns <= 0 or args.max_turns > 200:
@@ -215,9 +282,12 @@ def _validate_agent_configuration(args: argparse.Namespace) -> str:
     if args.command_timeout <= 0 or args.command_timeout > 600:
         raise ConfigurationError("--command-timeout must be between 1 and 600")
 
-    api_key = os.environ.get(args.api_key_env)
+    api_key = args.user_settings.api_key or os.environ.get(args.api_key_env)
     if not api_key:
-        raise ConfigurationError(f"environment variable {args.api_key_env} is not set")
+        raise ConfigurationError(
+            "set 'api_key' in ~/.coding-agent/settings.json or environment variable "
+            f"{args.api_key_env}"
+        )
     return api_key
 
 
@@ -244,7 +314,7 @@ def _inspect_run(args: argparse.Namespace) -> int:
         character not in "0123456789abcdef" for character in args.run_id
     ):
         raise ConfigurationError("run_id must be 32 lowercase hexadecimal characters")
-    path = _runs_root() / args.run_id / "events.jsonl"
+    path = _runs_root(args.configured_runs_dir) / args.run_id / "events.jsonl"
     if not path.is_file():
         raise ConfigurationError("run log was not found")
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -269,19 +339,7 @@ def _inspect_run(args: argparse.Namespace) -> int:
 
 
 def _eval(args: argparse.Namespace) -> int:
-    if not args.model:
-        raise ConfigurationError("set --model or CODING_AGENT_MODEL")
-    _validate_base_url(args.base_url)
-    _validate_thinking(args.thinking)
-    api_key = os.environ.get(args.api_key_env)
-    if not api_key:
-        raise ConfigurationError(f"environment variable {args.api_key_env} is not set")
-    if not 1 <= args.max_turns <= 200:
-        raise ConfigurationError("--max-turns must be between 1 and 200")
-    if not 1 <= args.max_seconds <= 7_200:
-        raise ConfigurationError("--max-seconds must be between 1 and 7200")
-    if not 1 <= args.command_timeout <= 600:
-        raise ConfigurationError("--command-timeout must be between 1 and 600")
+    api_key = _validate_agent_configuration(args)
     if args.repetitions is not None and not 1 <= args.repetitions <= 5:
         raise ConfigurationError("--repetitions must be between 1 and 5")
     try:
@@ -307,7 +365,7 @@ def _eval(args: argparse.Namespace) -> int:
         EvaluationConfig(
             model=model,
             options=options,
-            runs_root=_runs_root(),
+            runs_root=_runs_root(args.configured_runs_dir),
             redactor=redactor,
             metadata={
                 "agent_version": __version__,
@@ -330,7 +388,9 @@ def _eval(args: argparse.Namespace) -> int:
     return 0 if report["passed"] == report["runs"] else 3
 
 
-def _runs_root() -> Path:
+def _runs_root(configured_path: Path | None = None) -> Path:
+    if configured_path is not None:
+        return configured_path.expanduser().resolve()
     configured = os.environ.get("CODING_AGENT_RUNS_DIR")
     if configured:
         return Path(configured).expanduser().resolve()

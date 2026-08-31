@@ -48,6 +48,10 @@ class PathPolicy:
         lowered_parts = {part.lower() for part in normalized.parts}
         if ".git" in lowered_parts:
             raise PolicyViolation("direct file access to .git is not allowed")
+        if ".coding-agent" in lowered_parts:
+            raise PolicyViolation(
+                "direct file access to .coding-agent is not allowed"
+            )
         if self._is_sensitive(normalized):
             raise PolicyViolation("access to a likely credential file is not allowed")
         return candidate

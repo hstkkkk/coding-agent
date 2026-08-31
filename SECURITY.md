@@ -7,7 +7,7 @@ permissions.
 ## Controls
 
 - workspace-relative path validation after canonicalization;
-- rejection of direct `.git` and likely credential-file access;
+- rejection of direct `.git`, `.coding-agent`, and likely credential-file access;
 - hash-guarded edits and explicit create/delete operations;
 - no shell interpretation for normal commands;
 - interactive approval for command execution and deletion;
@@ -18,6 +18,9 @@ permissions.
 - read-only Git tools and rejection of common Git history/write operations;
 - trusted pre-run Git initialization with credential-protecting ignore rules
   and a filtered subprocess environment;
+- bounded, strictly validated per-user settings loaded outside the target
+  repository, with API-key values excluded from object representations and
+  validation errors;
 - process-tree termination on timeout or cancellation.
 
 Automatic `git init` and the initial baseline commit occur only in the trusted
@@ -34,5 +37,12 @@ current account through mechanisms the controller cannot observe. Run
 untrusted repositories only in an external sandbox.
 
 Secret-pattern filtering is defense in depth, not a complete data-loss
-prevention system. Do not place credentials in the target workspace.
+prevention system. Do not place credentials in the target workspace. Store the
+fixed `~/.coding-agent/settings.json` file with user-only operating-system
+permissions when it contains `api_key`.
+
+The model-facing file tools cannot open `.coding-agent/settings.json`, but an
+approved subprocess runs with the current account's permissions and can access
+resources that account can access. Do not approve execution in an untrusted
+repository merely because the file-tool boundary blocks the settings path.
 
