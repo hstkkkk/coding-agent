@@ -6,7 +6,7 @@ The next release makes `coding-agent` useful from the root of an ordinary local
 project without requiring the user to remember a subcommand or prepare Git
 manually.
 
-It provides five connected capabilities:
+It provides six connected capabilities:
 
 1. running bare `coding-agent` opens an interactive terminal session;
 2. starting a task in a directory that is not yet a Git repository safely
@@ -14,7 +14,9 @@ It provides five connected capabilities:
 3. typing `/` opens a keyboard-selectable session-command catalog;
 4. progress lines identify the target and observable result of each tool;
 5. risky operations use a concise approval summary with full redacted details
-   available on demand.
+   available on demand;
+6. conversational and read-only questions return a direct `ANSWERED` result
+   without requiring a fake workspace change.
 
 The existing `coding-agent run`, `inspect-run`, and `eval` commands remain
 available for scripts and repeatable evaluation.
@@ -49,6 +51,8 @@ catalog.
 - `coding-agent` with no arguments opens a terminal UI in the current directory.
 - A user can submit multiple natural-language requests without restarting the
   process.
+- A user can ask an informational question and receive a direct answer without
+  weakening verified completion for coding tasks.
 - Typing `/` exposes all session commands immediately, with arrow-key selection
   and type-to-filter behavior.
 - Model/tool progress names the directory, file, command, or output being
@@ -112,6 +116,12 @@ coding-agent> Fix the failing parser tests
 Model and tool events remain visible while the task runs. When the controller
 reaches a terminal state, the UI prints the status and run ID, then returns to
 the prompt.
+
+For a request such as `Who are you?`, the model calls `respond` and the UI
+prints `[ANSWER] ...` followed by an `ANSWERED` session status. Repository
+questions may use read-only tools first. If the current run has mutated the
+workspace, the controller rejects `respond` and still requires verified
+`finish` or an explicit blocked result.
 
 ### Readable progress
 
@@ -188,6 +198,10 @@ Each user submission creates a new `AgentEngine` run with its own run ID,
 budgets, events, artifacts, verification evidence, and terminal result. This
 preserves auditability and prevents an indefinitely growing controller state.
 
+`ANSWERED` means the objective was satisfied without a workspace mutation. It
+is not interchangeable with `SUCCEEDED`, which remains reserved for changed
+code backed by fresh verification and an inspectable diff.
+
 For follow-ups, the terminal session supplies a bounded summary of recent user
 requests and outcomes as context. Repository contents remain the authoritative
 state, and previous terminal outcomes do not grant permissions or count as
@@ -240,6 +254,8 @@ subprocesses receive a filtered environment and never run through a shell.
 - Bare `coding-agent` reaches a prompt in an existing repository.
 - `/` immediately displays every command and supports keyboard selection.
 - A natural-language line launches a real bounded run and returns to the prompt.
+- A pure conversation ends as `ANSWERED` without a file change or rejected
+  `finish` loop; `respond` after a mutation is rejected.
 - Every file/directory tool progress line names its target; command progress
   names the executable, purpose, and exit code without dumping inline code.
 - Approval initially stays bounded, `d` reveals full redacted arguments, and

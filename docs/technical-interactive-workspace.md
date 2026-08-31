@@ -6,6 +6,8 @@ The implementation must preserve the current controller contract:
 
 - `AgentEngine` remains the only module that decides run terminal state;
 - each model turn still normalizes to exactly one action;
+- `ANSWERED` remains distinct from verified `SUCCEEDED` and is allowed only
+  before any recorded workspace mutation;
 - verification evidence remains scoped to one run and workspace version;
 - target repository content and prior output remain untrusted;
 - Git operations exposed to the model remain read-only;
@@ -148,8 +150,9 @@ ID, event log, artifact store, tool runtime, and `AgentEngine` for every call.
 This removes duplicated per-run composition from `run` and the terminal UI.
 It does not own workspace setup, argument parsing, or terminal input.
 
-The one-shot command maps `RunResult.status` to the existing process exit code.
-The interactive session records the result and continues regardless of status.
+The one-shot command maps `SUCCEEDED` and `ANSWERED` to process exit code zero,
+while the distinct status preserves their semantics in events and reports. The
+interactive session records the result and continues regardless of status.
 
 ## 3. `InteractiveSession`
 
@@ -218,6 +221,13 @@ full output. Control/format characters are escaped before reaching the console.
 rationale punctuation; JSONL and JSON-console event shapes remain additive and
 redacted.
 
+The model protocol adds `respond(message) -> AnswerRequest`. `AgentEngine`
+accepts it as terminal `ANSWERED` only when `workspace_version == 0` and no
+changed path was recorded. After mutation it records an `answer_rejected`
+observation, returns to `RUNNING`, and requires `finish` with fresh evidence or
+`report_blocked`. Coding evaluation continues to pass only `SUCCEEDED` plus a
+successful independent Oracle.
+
 Before approval, `LocalToolRuntime` computes the operation digest from the
 original arguments, then supplies `PromptApprovalAdapter` with a bounded tool
 description and a separately redacted argument object. The adapter shows only
@@ -266,6 +276,8 @@ a one-time `uv tool install --editable <project>` for users who want bare
   redacted and still bound to the original operation digest.
 - Console progress escapes control characters supplied through model arguments
   and bounds every free-form field.
+- A non-mutating answer cannot authorize tools, waive approval, or satisfy a
+  coding evaluation; a post-mutation `respond` action is rejected.
 
 ## Tests
 
@@ -310,6 +322,8 @@ added solely for tests.
 - automatic initialization smoke test in a temporary non-Git directory;
 - `git diff --check` and a final repository status inspection.
 
-The tool schema and completion semantics remain unchanged, but the controller's
-event projection path is touched. Run the live evaluation suite when configured
-and still require agent success, Oracle exit code `0`, and zero false successes.
+The tool schema version advances because `respond` and `ANSWERED` extend the
+controller protocol. Run the live evaluation suite when configured and still
+require agent `SUCCEEDED`, Oracle exit code `0`, and zero false successes. Also
+run a real conversational smoke check that requires `ANSWERED` with no changed
+files.

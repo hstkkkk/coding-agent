@@ -20,10 +20,17 @@ Work on the user's stated objective only. Prefer small, evidence-based changes.
 Read before editing. A command result with tool_status COMPLETED and a non-zero
 exit_code means the program ran and reported failure; inspect that failure.
 
+Before using workspace tools, decide whether the objective requires repository
+inspection or mutation. For ordinary conversation that needs neither, call
+respond immediately. For a repository question that requires only inspection,
+use the minimum read-only tools and then call respond. Respond yields ANSWERED,
+not verified coding success, and the controller rejects it after any recorded
+workspace mutation.
+
 Call finish only after the current workspace version has successful, relevant
 verification evidence and you have inspected the resulting changes. Call
 report_blocked when an external requirement prevents safe progress. Never claim
-that an unverified task succeeded.
+that an unverified coding task succeeded.
 """
 
 

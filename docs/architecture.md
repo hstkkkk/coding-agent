@@ -5,7 +5,8 @@
 Given a natural-language task and one local workspace, the trusted CLI prepares
 a Git baseline when necessary. The agent may then inspect files, make bounded
 edits, run approved commands, and iterate on real tool results. It returns
-either verified changes or an explicit blocked, failed, or cancelled status.
+either verified changes, a non-mutating informational answer, or an explicit
+blocked, failed, or cancelled status.
 
 The first release targets small bug fixes and small feature additions. It does
 not target multi-repository work, deployment, GUI automation, long-running
@@ -87,17 +88,17 @@ model tool; Git operations inside the Agent Loop remain read-only.
 INITIALIZING
   -> REQUEST_MODEL
   -> VALIDATE_ACTION
-  -> EXECUTE_TOOL
-  -> RECORD_OBSERVATION
-  -> REQUEST_MODEL
-  -> VERIFY_FINISH
-  -> SUCCEEDED | BLOCKED | FAILED | CANCELLED
+     -> RESPOND -> ANSWERED
+     -> EXECUTE_TOOL -> RECORD_OBSERVATION -> REQUEST_MODEL
+     -> VERIFY_FINISH -> SUCCEEDED
+     -> BLOCKED
+  -> FAILED | CANCELLED
 ```
 
 Every model turn must normalize to exactly one of:
 
 ```text
-ToolCall | FinishRequest | BlockedRequest
+ToolCall | AnswerRequest | FinishRequest | BlockedRequest
 ```
 
 Multiple tool calls, unknown tools, or malformed arguments are protocol errors.
@@ -114,6 +115,12 @@ edit_file       create_file    delete_file
 run_command     git_status     git_diff
 read_output     search_output
 ```
+
+It also sees three controller actions: `respond`, `finish`, and
+`report_blocked`. `respond` terminates as `ANSWERED` for conversational or
+informational objectives that require no mutation. The controller rejects it
+after any recorded workspace mutation, so it cannot bypass the `finish`
+verification gate.
 
 Filesystem paths are workspace-relative. The implementation resolves traversal,
 symbolic links, and junctions before checking containment. Direct `.git`,
@@ -164,6 +171,10 @@ The model's `finish` request is accepted only when:
 The controller proves that the evidence ran against the current state; it does
 not claim that a finite test suite proves semantic correctness.
 
+`ANSWERED` is a separate non-mutating terminal state. It is valid before any
+workspace mutation, including after read-only inspection, and does not claim a
+verified code change.
+
 ## Error and retry policy
 
 Temporary model transport failures use bounded exponential backoff.
@@ -181,7 +192,8 @@ limits.
 Evaluation does not trust `RunResult` alone. Each task starts from a fresh Git
 fixture. After the agent stops, hidden files are injected and an independent
 Oracle command runs outside the Agent Loop. A claimed success with a failing
-Oracle is counted explicitly as a false success.
+Oracle is counted explicitly as a false success. Only `SUCCEEDED` can pass a
+coding evaluation; `ANSWERED` is always a non-pass.
 
 ## Known limitations
 

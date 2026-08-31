@@ -32,6 +32,8 @@ The language model is an untrusted decision module, not the control plane.
 Permissions, budgets, retries, workspace versions, and terminal states remain
 controller-owned. `finish` is only a request: completion is accepted only when
 the cited successful verification belongs to the current workspace version.
+Informational requests use a separate `respond` action and end as `ANSWERED`
+without pretending that a code change was verified.
 
 ## Requirements
 
@@ -157,6 +159,20 @@ Session commands:
 /exit       end the session
 ```
 
+The prompt also accepts ordinary questions. A conversation that does not need
+the repository answers directly; a read-only repository question may inspect
+files first. Both end as `ANSWERED` and do not require a synthetic file change:
+
+```text
+coding-agent> Who are you?
+[MODEL] respond
+[ANSWER] I am a bounded coding agent for this local workspace.
+[SESSION] ANSWERED | Run ID: ...
+```
+
+Once a run changes the workspace, `respond` is rejected and the run must use
+verified `finish` or explicitly report why it is blocked.
+
 Progress lines identify the object being handled and the observable result:
 
 ```text
@@ -237,9 +253,9 @@ python -m unittest discover -s tests -v
 ```
 
 It covers model protocol validation, completion gating, stale verification,
-retry limits, path escape attempts, secret-file policy, edit conflicts,
-approval, subprocess behavior, output redaction, and a full real-tool loop in a
-temporary Git repository.
+non-mutating answers, retry limits, path escape attempts, secret-file policy,
+edit conflicts, approval, subprocess behavior, output redaction, and a full
+real-tool loop in a temporary Git repository.
 
 ## Evaluate
 

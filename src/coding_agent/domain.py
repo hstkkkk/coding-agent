@@ -20,6 +20,7 @@ class RunStatus(str, Enum):
     RUNNING = "RUNNING"
     VERIFYING = "VERIFYING"
     SUCCEEDED = "SUCCEEDED"
+    ANSWERED = "ANSWERED"
     BLOCKED = "BLOCKED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
@@ -76,6 +77,12 @@ class ToolCall:
 
 
 @dataclass(frozen=True, slots=True)
+class AnswerRequest:
+    call_id: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
 class FinishRequest:
     call_id: str
     summary: str
@@ -90,7 +97,7 @@ class BlockedRequest:
     needed: str = ""
 
 
-Action: TypeAlias = ToolCall | FinishRequest | BlockedRequest
+Action: TypeAlias = ToolCall | AnswerRequest | FinishRequest | BlockedRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +294,8 @@ class BudgetExhaustedError(AgentError):
 
 
 def action_name(action: Action) -> str:
+    if isinstance(action, AnswerRequest):
+        return "respond"
     if isinstance(action, FinishRequest):
         return "finish"
     if isinstance(action, BlockedRequest):
@@ -295,6 +304,8 @@ def action_name(action: Action) -> str:
 
 
 def action_arguments(action: Action) -> JsonObject:
+    if isinstance(action, AnswerRequest):
+        return {"message": action.message}
     if isinstance(action, FinishRequest):
         return {
             "summary": action.summary,

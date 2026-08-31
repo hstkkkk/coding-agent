@@ -8,7 +8,13 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from coding_agent.cli import _runs_root, _validate_agent_configuration, build_parser, main
+from coding_agent.cli import (
+    EXIT_CODES,
+    _runs_root,
+    _validate_agent_configuration,
+    build_parser,
+    main,
+)
 from coding_agent.domain import RunResult, RunStatus
 from coding_agent.settings import SettingsError, UserSettings
 
@@ -28,6 +34,9 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(tui.call_count, 1)
+
+    def test_answered_run_has_a_successful_process_exit(self) -> None:
+        self.assertEqual(EXIT_CODES[RunStatus.ANSWERED], 0)
 
     def test_parser_exposes_explicit_tui_command(self) -> None:
         args = build_parser().parse_args(["tui"])

@@ -14,6 +14,7 @@ from .context import ContextManager
 from .domain import (
     Action,
     AgentError,
+    AnswerRequest,
     AssistantTurn,
     BlockedRequest,
     BudgetExhaustedError,
@@ -47,6 +48,23 @@ from .tools.runtime import ToolRuntime
 
 
 CONTROL_DEFINITIONS = (
+    ToolDefinition(
+        name="respond",
+        description=(
+            "Answer an informational or conversational request that is complete "
+            "without changing the workspace. This returns ANSWERED, not verified "
+            "coding success, and is rejected after any workspace mutation."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "minLength": 1},
+            },
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+        risk=RiskLevel.READ_ONLY,
+    ),
     ToolDefinition(
         name="finish",
         description="Request successful completion using fresh verification evidence.",
@@ -233,6 +251,11 @@ class AgentEngine:
 
                 if isinstance(turn.action, FinishRequest):
                     completed = self._handle_finish(state, turn, emitter)
+                    if completed is not None:
+                        return completed
+                    continue
+                if isinstance(turn.action, AnswerRequest):
+                    completed = self._handle_answer(state, turn, emitter)
                     if completed is not None:
                         return completed
                     continue
@@ -424,6 +447,45 @@ class AgentEngine:
             RunStatus.SUCCEEDED,
             turn.action.summary,
             warnings=turn.action.warnings,
+        )
+
+    def _handle_answer(
+        self,
+        state: RunState,
+        turn: AssistantTurn,
+        emitter: EventEmitter,
+    ) -> RunResult | None:
+        assert isinstance(turn.action, AnswerRequest)
+        if state.workspace_version > 0 or state.changed_files:
+            reason = (
+                "respond cannot complete a run after a workspace mutation; "
+                "use finish with fresh verification evidence or report_blocked"
+            )
+            state.recent_errors.append(
+                f"{ErrorCode.VERIFICATION_FAILED.value}: {reason}"
+            )
+            state.recent_errors = state.recent_errors[-10:]
+            state.steps.append(
+                StepRecord(
+                    step=state.model_turns,
+                    workspace_version=state.workspace_version,
+                    rationale=turn.rationale,
+                    action_name="respond",
+                    arguments=action_arguments(turn.action),
+                    result={
+                        "status": "REJECTED",
+                        "error_code": ErrorCode.VERIFICATION_FAILED.value,
+                        "message": reason,
+                    },
+                )
+            )
+            emitter.emit("answer_rejected", reason=reason)
+            return None
+        return self._terminal(
+            state,
+            emitter,
+            RunStatus.ANSWERED,
+            turn.action.message,
         )
 
     @staticmethod

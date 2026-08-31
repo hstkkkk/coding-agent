@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from coding_agent.domain import (
+    AnswerRequest,
     AssistantTurn,
     BlockedRequest,
     ErrorCode,
@@ -131,6 +132,34 @@ class AgentEngineTests(unittest.TestCase):
         tool_events = [event for event in events.events if event.kind == "tool_finished"]
         self.assertEqual(model_events[0].data["detail"], "path=app.py")
         self.assertEqual(tool_events[0].data["detail"], "path=app.py · changed")
+
+    def test_pure_conversation_returns_answered_without_workspace_change(self) -> None:
+        result, model, tools, events = self.run_engine(
+            [AssistantTurn("answer directly", AnswerRequest("answer", "我是编程智能体。"))]
+        )
+
+        self.assertEqual(result.status, RunStatus.ANSWERED)
+        self.assertEqual(result.summary, "我是编程智能体。")
+        self.assertEqual(result.changed_files, ())
+        self.assertEqual(tools.calls, [])
+        self.assertEqual(events.events[-1].data["status"], "ANSWERED")
+        self.assertIn("respond", {tool.name for tool in model.requests[0].tools})
+
+    def test_answer_is_rejected_after_workspace_mutation(self) -> None:
+        result, _, tools, events = self.run_engine(
+            [
+                edit_turn(),
+                AssistantTurn("answer instead", AnswerRequest("answer", "done")),
+                AssistantTurn(
+                    "cannot verify",
+                    BlockedRequest("blocked", "verification unavailable"),
+                ),
+            ]
+        )
+
+        self.assertEqual(result.status, RunStatus.BLOCKED)
+        self.assertEqual(tools.calls, ["edit_file"])
+        self.assertTrue(any(event.kind == "answer_rejected" for event in events.events))
 
     def test_rejects_finish_without_evidence_then_allows_blocked(self) -> None:
         result, _, _, events = self.run_engine(

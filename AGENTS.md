@@ -25,8 +25,12 @@ terminal state.
 
 - `AgentEngine` is the control plane. A model response never directly mutates
   state or declares success.
-- Normalize each model turn to exactly one `ToolCall`, `FinishRequest`, or
-  `BlockedRequest`; schema- and policy-check it before execution.
+- Normalize each model turn to exactly one `ToolCall`, `AnswerRequest`,
+  `FinishRequest`, or `BlockedRequest`; schema- and policy-check it before
+  execution.
+- Accept `respond` only while no workspace mutation has been recorded. Keep
+  `ANSWERED` distinct from verified coding success and never count it as an
+  evaluation pass.
 - Treat `finish` as a request. Accept it only with fresh successful verification
   evidence for the current `workspace_version` and an inspectable final diff.
 - Increment `workspace_version` for every detected mutation so older evidence

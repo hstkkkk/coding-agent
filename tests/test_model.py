@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import unittest
 
-from coding_agent.domain import FinishRequest, ModelProtocolError, ModelRequest, RiskLevel, ToolDefinition
+from coding_agent.domain import (
+    AnswerRequest,
+    FinishRequest,
+    ModelProtocolError,
+    ModelRequest,
+    RiskLevel,
+    ToolDefinition,
+)
 from coding_agent.model import OpenAICompatibleAdapter
 
 
@@ -26,6 +33,16 @@ FINISH_TOOL = ToolDefinition(
             "verification_ids": {"type": "array", "items": {"type": "string"}},
         },
         "required": ["summary", "verification_ids"],
+    },
+    risk=RiskLevel.READ_ONLY,
+)
+ANSWER_TOOL = ToolDefinition(
+    name="respond",
+    description="answer without changing the workspace",
+    input_schema={
+        "type": "object",
+        "properties": {"message": {"type": "string"}},
+        "required": ["message"],
     },
     risk=RiskLevel.READ_ONLY,
 )
@@ -110,6 +127,57 @@ class ModelAdapterTests(unittest.TestCase):
         self.assertEqual(turn.action.verification_ids, ("v1",))
         self.assertEqual(turn.rationale, "Evidence is fresh.")
         self.assertEqual(adapter.last_payload["tool_choice"], "required")
+
+    def test_normalizes_respond_control_action(self) -> None:
+        adapter = StubAdapter(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-answer",
+                                    "function": {
+                                        "name": "respond",
+                                        "arguments": '{"message":"I am a coding agent."}',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+
+        turn = adapter.complete(ModelRequest("system", "task", (ANSWER_TOOL,)))
+
+        self.assertIsInstance(turn.action, AnswerRequest)
+        assert isinstance(turn.action, AnswerRequest)
+        self.assertEqual(turn.action.message, "I am a coding agent.")
+
+    def test_rejects_unknown_respond_argument(self) -> None:
+        adapter = StubAdapter(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-answer",
+                                    "function": {
+                                        "name": "respond",
+                                        "arguments": '{"message":"hello","force":true}',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+
+        with self.assertRaises(ModelProtocolError):
+            adapter.complete(ModelRequest("system", "task", (ANSWER_TOOL,)))
 
     def test_rejects_multiple_actions(self) -> None:
         tool_call = {

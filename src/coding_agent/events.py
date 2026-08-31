@@ -118,8 +118,13 @@ class ConsoleEventSink(EventSink):
             )
         elif event.kind == "verification_rejected":
             print(f"[VERIFY] rejected: {data.get('reason', '')}")
+        elif event.kind == "answer_rejected":
+            print(f"[ANSWER] rejected: {_console_text(data.get('reason', ''))}")
         elif event.kind == "terminal":
-            print(f"[DONE] {data.get('status', 'UNKNOWN')}: {data.get('summary', '')}")
+            if data.get("status") == "ANSWERED":
+                print(f"[ANSWER] {_console_text(data.get('summary', ''), limit=4_000)}")
+            else:
+                print(f"[DONE] {data.get('status', 'UNKNOWN')}: {data.get('summary', '')}")
         elif event.kind in {"retry", "warning"}:
             print(f"[{event.kind.upper()}] {data.get('message', '')}")
 

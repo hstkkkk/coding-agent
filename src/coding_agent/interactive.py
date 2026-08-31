@@ -213,6 +213,8 @@ class InteractiveSession:
 def _status_color(status: RunStatus) -> str:
     if status is RunStatus.SUCCEEDED:
         return "32"
+    if status is RunStatus.ANSWERED:
+        return "36"
     if status is RunStatus.BLOCKED:
         return "33"
     if status is RunStatus.CANCELLED:

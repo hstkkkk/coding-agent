@@ -5,7 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from coding_agent.domain import AssistantTurn, FinishRequest, RunOptions, ToolCall
+from coding_agent.domain import (
+    AnswerRequest,
+    AssistantTurn,
+    FinishRequest,
+    RunOptions,
+    ToolCall,
+)
 from coding_agent.evaluation import EvaluationConfig, load_suite, run_evaluation
 from coding_agent.events import Redactor
 from coding_agent.model import ScriptedModelAdapter
@@ -92,6 +98,29 @@ class EvaluationHarnessTests(unittest.TestCase):
             self.assertEqual(report["false_successes"], 0)
             self.assertNotEqual(report["entries"][0]["baseline_exit_code"], 0)
             self.assertEqual(report["entries"][0]["oracle_exit_code"], 0)
+
+    def test_answered_run_is_not_an_evaluation_pass(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        suite = load_suite(project_root / "evaluation" / "suite.json")
+        model = ScriptedModelAdapter(
+            [AssistantTurn("answer only", AnswerRequest("answer", "No change needed."))]
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            _, report = run_evaluation(
+                suite,
+                EvaluationConfig(
+                    model=model,
+                    options=RunOptions(),
+                    runs_root=Path(directory) / "runs",
+                    redactor=Redactor(),
+                    metadata={"model_name": "scripted"},
+                ),
+            )
+
+        self.assertEqual(report["passed"], 0)
+        self.assertEqual(report["false_successes"], 0)
+        self.assertEqual(report["entries"][0]["agent_status"], "ANSWERED")
 
 
 if __name__ == "__main__":

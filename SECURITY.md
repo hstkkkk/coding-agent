@@ -27,6 +27,12 @@ permissions.
   validation errors;
 - process-tree termination on timeout or cancellation.
 
+`ANSWERED` is deliberately separate from verified coding success. The
+controller accepts `respond` only before any recorded workspace mutation, and
+the evaluator never treats `ANSWERED` as a passing coding result. This prevents
+a model from editing files and then using a conversational terminal action to
+bypass fresh verification.
+
 Automatic `git init` and the initial baseline commit occur only in the trusted
 CLI startup path after configuration preflight. Existing repositories are not
 committed, cleaned, or rewritten. These Git writes are never available to the

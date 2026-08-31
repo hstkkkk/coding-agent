@@ -28,6 +28,7 @@ from .workspace import WorkspaceSetupError, WorkspaceSetupResult, prepare_worksp
 
 EXIT_CODES = {
     RunStatus.SUCCEEDED: 0,
+    RunStatus.ANSWERED: 0,
     RunStatus.BLOCKED: 2,
     RunStatus.FAILED: 3,
     RunStatus.CANCELLED: 4,
@@ -237,7 +238,7 @@ def _build_local_runner(
     metadata = {
         "agent_version": __version__,
         "prompt_sha256": _prompt_hash(),
-        "tool_schema_version": "1",
+        "tool_schema_version": "2",
         "model_name": args.model,
         "thinking_mode": args.thinking or "provider_default",
         "endpoint_host": parsed_endpoint.hostname or "",
@@ -334,7 +335,11 @@ def _inspect_run(args: argparse.Namespace) -> int:
                 f"{data.get('status', '')}"
             )
         elif kind == "terminal":
-            print(f"{event['sequence']:>3} DONE  {data.get('status', '')}: {data.get('summary', '')}")
+            label = "ANSWER" if data.get("status") == "ANSWERED" else "DONE"
+            print(
+                f"{event['sequence']:>3} {label:<6} "
+                f"{data.get('status', '')}: {data.get('summary', '')}"
+            )
     return 0
 
 
@@ -370,7 +375,7 @@ def _eval(args: argparse.Namespace) -> int:
             metadata={
                 "agent_version": __version__,
                 "prompt_sha256": _prompt_hash(),
-                "tool_schema_version": "1",
+                "tool_schema_version": "2",
                 "model_name": args.model,
                 "thinking_mode": args.thinking or "provider_default",
                 "endpoint_host": endpoint.hostname or "",

@@ -59,6 +59,22 @@ class EventAndContextTests(unittest.TestCase):
         )
         self.assertNotIn("list_directory:", rendered)
 
+    def test_console_renders_answered_terminal_as_an_answer(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            ConsoleEventSink().emit(
+                RunEvent(
+                    run_id="run",
+                    sequence=1,
+                    kind="terminal",
+                    timestamp="now",
+                    data={"status": "ANSWERED", "summary": "I am a coding agent."},
+                )
+            )
+
+        self.assertEqual(output.getvalue(), "[ANSWER] I am a coding agent.\n")
+
     def test_redacts_known_and_pattern_secrets_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"
@@ -103,6 +119,8 @@ class EventAndContextTests(unittest.TestCase):
             self.assertIn("fix parser", request.user_prompt)
             self.assertIn("latest", request.user_prompt)
             self.assertIn("controller", request.system_prompt.lower())
+            normalized_prompt = " ".join(request.system_prompt.split())
+            self.assertIn("call respond immediately", normalized_prompt)
 
 
 if __name__ == "__main__":

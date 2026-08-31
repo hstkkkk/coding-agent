@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any, Iterable
 
 from .domain import (
+    AnswerRequest,
     AssistantTurn,
     BlockedRequest,
     FinishRequest,
@@ -153,7 +154,13 @@ class OpenAICompatibleAdapter(ModelPort):
         rationale_value = message_obj.get("content")
         rationale = rationale_value.strip() if isinstance(rationale_value, str) else ""
 
-        if name == "finish":
+        if name == "respond":
+            _reject_unknown_arguments(arguments, {"message"})
+            action = AnswerRequest(
+                call_id=call_id,
+                message=require_string(arguments.get("message"), "response message"),
+            )
+        elif name == "finish":
             _reject_unknown_arguments(arguments, {"summary", "verification_ids", "warnings"})
             action = FinishRequest(
                 call_id=call_id,
