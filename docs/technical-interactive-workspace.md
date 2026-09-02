@@ -335,6 +335,15 @@ observation, returns to `RUNNING`, and requires `finish` with fresh evidence or
 `report_blocked`. Coding evaluation continues to pass only `SUCCEEDED` plus a
 successful independent Oracle.
 
+The model-turn budget counts normal work decisions. If its final work decision
+creates fresh completion evidence, `AgentEngine` emits `[FINALIZE]` and grants
+one additional decision with only `finish` and `report_blocked` available. This
+prevents a successful final verification from being converted into
+`BUDGET_EXHAUSTED` merely because no ordinary turn remains to cite it. The
+controller does not grant the grace decision for stale or missing evidence,
+does not extend the wall-clock budget, and defensively rejects any attempted
+work action without executing it.
+
 Before approval, `LocalToolRuntime` computes the operation digest from the
 original arguments, then supplies `PromptApprovalAdapter` with a bounded tool
 description and a separately redacted argument object. The adapter shows only

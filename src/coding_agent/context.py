@@ -32,6 +32,12 @@ verification evidence and you have inspected the resulting changes. Call
 report_blocked when an external requirement prevents safe progress. Never claim
 that an unverified coding task succeeded.
 
+When completion_evidence_ready is true, the controller has fresh evidence for
+the current workspace version, including browser evidence when required. Prefer
+finish unless you can identify a concrete unmet requirement from the objective
+or observations. In finalization_mode, the normal work-turn budget is exhausted:
+choose finish with current evidence or report_blocked. Do not attempt more work.
+
 For a visual web, UI, animation, or browser-interaction objective, call
 browser_check after the final web-file mutation and cite that browser
 verification when finishing. A syntax check alone is not visual evidence. The
@@ -158,7 +164,9 @@ class ContextManager:
             for item in state.verifications[-8:]
         ]
         payload = {
+            "completion_evidence_ready": state.completion_evidence_ready,
             "status": state.status.value,
+            "finalization_mode": state.finalization_mode,
             "model_turns": state.model_turns,
             "tool_calls": state.tool_calls,
             "workspace_version": state.workspace_version,

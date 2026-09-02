@@ -271,7 +271,7 @@ Useful options:
 
 ```text
 --approval-mode prompt|deny
---max-turns N
+--max-turns N            normal work decisions; fresh evidence may add one finish-only decision
 --max-seconds N
 --command-timeout N
 --allow-program NAME

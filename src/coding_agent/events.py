@@ -157,6 +157,8 @@ class ConsoleEventSink(EventSink):
                 f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{suffix} -> "
                 f"CACHED · {_console_text(data.get('reason', ''))}"
             )
+        elif event.kind == "finalization_started":
+            print(f"[FINALIZE] {_console_text(data.get('message', ''), limit=600)}")
         elif event.kind == "terminal":
             if data.get("status") == "ANSWERED":
                 print(f"[ANSWER] {_console_text(data.get('summary', ''), limit=4_000)}")

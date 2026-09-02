@@ -116,6 +116,14 @@ Multiple tool calls, unknown tools, or malformed arguments are protocol errors.
 The controller permits a bounded correction attempt without executing a
 partial action.
 
+`max_model_turns` bounds normal work decisions. If the last permitted work
+decision produces fresh completion evidence, the controller grants exactly one
+additional finalization decision rather than failing before the model can cite
+that evidence. This decision exposes only `finish` and `report_blocked`; a
+rejected finish or any non-terminal action ends the run and cannot reopen the
+work loop. The grace decision is never available without current evidence or
+after the wall-clock budget expires.
+
 ## Tool execution
 
 The model sees thirteen local tools:
@@ -176,6 +184,12 @@ derived view containing:
   from controller memory for the same workspace version;
 - the current tool schemas.
 
+The derived state also reports `completion_evidence_ready`. It becomes true
+only when the current workspace version has the verification evidence required
+by the controller, including browser evidence for visual Web work. It is a
+finalization hint, not a claim that the implementation is semantically correct,
+and any later mutation makes the previous evidence stale.
+
 Old events remain on disk when they fall out of the model view. Repository
 contents and tool output are treated as untrusted data and cannot grant new
 permissions.
@@ -226,6 +240,12 @@ Authentication and malformed requests do not retry. Model protocol mistakes
 receive structured feedback up to a small limit. File conflicts, command
 failures, timeouts, approval denials, and policy denials become observations;
 non-idempotent local actions are never retried automatically.
+
+When the normal model-turn budget is exhausted with fresh completion evidence,
+one finish-only model decision may run under the remaining wall-clock budget.
+The console marks this transition with `[FINALIZE]`. Transport retries remain
+bounded inside that single logical decision; the controller never executes a
+new work tool from finalization mode.
 
 Successful file reads form an in-run, workspace-version-scoped cache. A later
 request for a fully covered range receives the requested slice as a `CACHED`

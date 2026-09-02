@@ -367,6 +367,103 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.FAILED)
         self.assertEqual(result.error_code, ErrorCode.BUDGET_EXHAUSTED)
 
+    def test_current_verification_is_marked_ready_for_completion(self) -> None:
+        def finish_when_ready(request) -> AssistantTurn:
+            self.assertIn('"completion_evidence_ready": true', request.user_prompt)
+            self.assertIn('"finalization_mode": false', request.user_prompt)
+            return finish_from_context(request)
+
+        result, _, _, _ = self.run_engine(
+            [edit_turn(), verify_turn(), finish_when_ready]
+        )
+
+        self.assertEqual(result.status, RunStatus.SUCCEEDED)
+
+    def test_final_verification_can_use_the_last_work_turn_then_finish_in_grace(self) -> None:
+        tools = FakeToolRuntime(changed_file="index.html")
+
+        def finish_in_grace(request) -> AssistantTurn:
+            self.assertEqual(
+                {tool.name for tool in request.tools},
+                {"finish", "report_blocked"},
+            )
+            self.assertIn('"completion_evidence_ready": true', request.user_prompt)
+            self.assertIn('"finalization_mode": true', request.user_prompt)
+            return finish_with_latest_evidence(request)
+
+        result, model, _, events = self.run_engine(
+            [
+                edit_turn(),
+                verify_turn(),
+                AssistantTurn(
+                    "render the current page",
+                    ToolCall("browser", "browser_check", {"path": "index.html"}),
+                ),
+                finish_in_grace,
+            ],
+            options=RunOptions(max_model_turns=3),
+            objective="改进网页版沙子游戏的视觉效果、动画和交互",
+            tools=tools,
+        )
+
+        self.assertEqual(result.status, RunStatus.SUCCEEDED)
+        self.assertEqual(result.model_turns, 4)
+        self.assertEqual(len(model.requests), 4)
+        self.assertEqual(
+            len([event for event in events.events if event.kind == "finalization_started"]),
+            1,
+        )
+
+    def test_budget_has_no_finalization_grace_without_fresh_evidence(self) -> None:
+        result, model, _, events = self.run_engine(
+            [edit_turn()],
+            options=RunOptions(max_model_turns=1),
+        )
+
+        self.assertEqual(result.status, RunStatus.FAILED)
+        self.assertEqual(result.error_code, ErrorCode.BUDGET_EXHAUSTED)
+        self.assertEqual(len(model.requests), 1)
+        self.assertFalse(any(event.kind == "finalization_started" for event in events.events))
+
+    def test_rejected_finish_in_grace_cannot_reopen_the_work_loop(self) -> None:
+        result, model, _, events = self.run_engine(
+            [
+                edit_turn(),
+                verify_turn(),
+                AssistantTurn(
+                    "finish with invalid evidence",
+                    FinishRequest("bad-finish", "done", ("0" * 32,)),
+                ),
+            ],
+            options=RunOptions(max_model_turns=2),
+        )
+
+        self.assertEqual(result.status, RunStatus.FAILED)
+        self.assertEqual(result.error_code, ErrorCode.BUDGET_EXHAUSTED)
+        self.assertEqual(result.model_turns, 3)
+        self.assertEqual(len(model.requests), 3)
+        self.assertTrue(any(event.kind == "verification_rejected" for event in events.events))
+
+    def test_finalization_grace_never_executes_another_work_action(self) -> None:
+        result, model, tools, events = self.run_engine(
+            [
+                edit_turn(),
+                verify_turn(),
+                AssistantTurn(
+                    "try another edit",
+                    ToolCall("late-edit", "edit_file", {"path": "app.py"}),
+                ),
+            ],
+            options=RunOptions(max_model_turns=2),
+        )
+
+        self.assertEqual(result.status, RunStatus.FAILED)
+        self.assertEqual(result.error_code, ErrorCode.BUDGET_EXHAUSTED)
+        self.assertEqual(result.model_turns, 3)
+        self.assertEqual(len(model.requests), 3)
+        self.assertEqual(tools.calls, ["edit_file", "run_command"])
+        self.assertTrue(any(event.kind == "finalization_started" for event in events.events))
+
     def test_identical_action_stagnation_stops_before_third_execution(self) -> None:
         same = AssistantTurn("inspect", ToolCall("same", "git_diff", {}))
         result, model, tools, events = self.run_engine([same, same, same])

@@ -137,6 +137,10 @@ _VISUAL_OBJECTIVE_TERMS = (
     "效果",
 )
 _READ_CACHE_RECOVERY_THRESHOLD = 2
+_MODEL_TURN_BUDGET_EXHAUSTED = "model-turn budget exhausted"
+_FINALIZATION_MESSAGE = (
+    "work-turn budget exhausted; allowing one finish-only decision"
+)
 
 
 class SystemClock(Clock):
@@ -217,7 +221,12 @@ class AgentEngine:
         try:
             while True:
                 budget_failure = self._check_budget(state, started)
-                if budget_failure:
+                if budget_failure and not self._enter_finalization_mode(
+                    state,
+                    emitter,
+                    started,
+                    budget_failure,
+                ):
                     return self._terminal(
                         state,
                         emitter,
@@ -280,6 +289,17 @@ class AgentEngine:
                     rationale=turn.rationale[:1_000],
                     repeated=state.repeated_actions,
                 )
+                if state.finalization_mode and not isinstance(
+                    turn.action,
+                    (FinishRequest, BlockedRequest),
+                ):
+                    return self._terminal(
+                        state,
+                        emitter,
+                        RunStatus.FAILED,
+                        "model returned a non-terminal action during finish-only grace",
+                        error_code=ErrorCode.BUDGET_EXHAUSTED,
+                    )
                 if cached_read is not None:
                     self._record_cached_read(state, turn, cached_read, emitter)
                     continue
@@ -357,7 +377,16 @@ class AgentEngine:
     ) -> AssistantTurn:
         tools = self.tools.definitions + CONTROL_DEFINITIONS
         request = self.context.build(state, tools)
-        if self._consecutive_cached_reads(state) >= _READ_CACHE_RECOVERY_THRESHOLD:
+        if state.finalization_mode:
+            request = replace(
+                request,
+                tools=tuple(
+                    definition
+                    for definition in request.tools
+                    if definition.name in {"finish", "report_blocked"}
+                ),
+            )
+        elif self._consecutive_cached_reads(state) >= _READ_CACHE_RECOVERY_THRESHOLD:
             request = replace(
                 request,
                 tools=tuple(
@@ -366,7 +395,11 @@ class AgentEngine:
             )
         last_error: ModelTransientError | None = None
         for attempt in range(1, self.options.model_retry_attempts + 1):
-            budget_failure = self._check_budget(state, started)
+            budget_failure = self._check_budget(
+                state,
+                started,
+                ignore_model_turns=state.finalization_mode,
+            )
             if budget_failure:
                 raise BudgetExhaustedError(budget_failure)
             state.model_turns += 1
@@ -406,6 +439,7 @@ class AgentEngine:
                 state.changed_files.update(str(item) for item in changed)
 
         result = self._attach_verification(state, turn.action, result)
+        state.completion_evidence_ready = _completion_evidence_ready(state)
         if result.error_code:
             state.recent_errors.append(f"{result.error_code.value}: {result.message}")
             state.recent_errors = state.recent_errors[-10:]
@@ -619,12 +653,37 @@ class AgentEngine:
             )
         return None
 
-    def _check_budget(self, state: RunState, started: float) -> str | None:
-        if state.model_turns >= self.options.max_model_turns:
-            return "model-turn budget exhausted"
+    def _check_budget(
+        self,
+        state: RunState,
+        started: float,
+        *,
+        ignore_model_turns: bool = False,
+    ) -> str | None:
+        if not ignore_model_turns and state.model_turns >= self.options.max_model_turns:
+            return _MODEL_TURN_BUDGET_EXHAUSTED
         if self.clock.monotonic() - started >= self.options.max_wall_seconds:
             return "wall-clock budget exhausted"
         return None
+
+    def _enter_finalization_mode(
+        self,
+        state: RunState,
+        emitter: EventEmitter,
+        started: float,
+        budget_failure: str,
+    ) -> bool:
+        if (
+            budget_failure != _MODEL_TURN_BUDGET_EXHAUSTED
+            or state.finalization_grace_used
+            or not state.completion_evidence_ready
+            or self._check_budget(state, started, ignore_model_turns=True) is not None
+        ):
+            return False
+        state.finalization_grace_used = True
+        state.finalization_mode = True
+        emitter.emit("finalization_started", message=_FINALIZATION_MESSAGE)
+        return True
 
     def _track_action_fingerprint(self, state: RunState, action: Action) -> str | None:
         encoded = json.dumps(
@@ -916,3 +975,18 @@ def _requires_browser_verification(state: RunState) -> bool:
         "\nCurrent request:\n", 1
     )[-1].casefold()
     return any(term in current_objective for term in _VISUAL_OBJECTIVE_TERMS)
+
+
+def _completion_evidence_ready(state: RunState) -> bool:
+    if not state.changed_files:
+        return False
+    current_passes = [
+        record
+        for record in state.verifications
+        if record.passed and record.workspace_version == state.workspace_version
+    ]
+    if not current_passes:
+        return False
+    if _requires_browser_verification(state):
+        return any(record.kind == "browser" for record in current_passes)
+    return True

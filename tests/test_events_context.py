@@ -106,6 +106,29 @@ class EventAndContextTests(unittest.TestCase):
             "served from the controller read cache\n",
         )
 
+    def test_console_announces_the_finish_only_grace_turn(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            ConsoleEventSink().emit(
+                RunEvent(
+                    run_id="run",
+                    sequence=1,
+                    kind="finalization_started",
+                    timestamp="now",
+                    data={
+                        "message": (
+                            "work-turn budget exhausted; allowing one finish-only decision"
+                        )
+                    },
+                )
+            )
+
+        self.assertEqual(
+            output.getvalue(),
+            "[FINALIZE] work-turn budget exhausted; allowing one finish-only decision\n",
+        )
+
     def test_console_reports_how_to_restore_a_before_image(self) -> None:
         output = io.StringIO()
         recovery_id = "b" * 32

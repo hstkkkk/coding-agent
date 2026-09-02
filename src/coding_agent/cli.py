@@ -179,6 +179,10 @@ def _add_execution_arguments(
         "--max-turns",
         type=int,
         default=_configured_value(settings, "max_turns", default=30),
+        help=(
+            "maximum normal work decisions; fresh final evidence may grant "
+            "one finish-only decision"
+        ),
     )
     parser.add_argument(
         "--max-seconds",
