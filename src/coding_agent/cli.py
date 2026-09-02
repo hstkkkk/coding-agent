@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import sys
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -61,7 +62,11 @@ def build_parser(settings: UserSettings | None = None) -> argparse.ArgumentParse
         "resume",
         help="resume a persisted interactive session",
     )
-    resume_parser.add_argument("session_id")
+    resume_parser.add_argument(
+        "session_id",
+        metavar="REFERENCE",
+        help="full session ID or unique hexadecimal prefix (at least 2 characters)",
+    )
     _add_agent_arguments(resume_parser, settings, include_json=False)
     _add_session_arguments(resume_parser, settings)
 
@@ -282,12 +287,35 @@ def _sessions(args: argparse.Namespace) -> int:
         print("No persisted sessions found.")
         return 0
     for session in sessions:
+        timestamp = session.last_turn_at or session.created_at
+        last_request = (
+            _one_line(session.last_request)
+            if session.last_request
+            else "no completed request"
+        )
         print(
-            f"{session.session_id}  {session.updated_at}  "
+            f"{session.reference}  {_local_time(timestamp)}  "
             f"turns={session.turn_count} compacted={session.compacted_turns}  "
-            f"{session.workspace}"
+            f"last={last_request}  {session.workspace}"
         )
     return 0
+
+
+def _local_time(value: str) -> str:
+    try:
+        return datetime.fromisoformat(value).astimezone().isoformat(timespec="minutes")
+    except ValueError:
+        return "unknown-time"
+
+
+def _one_line(value: str, *, limit: int = 80) -> str:
+    printable = "".join(
+        character if character.isprintable() else " " for character in value
+    )
+    normalized = " ".join(printable.split()) or "[empty]"
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3] + "..."
 
 
 def _prepare_agent_workspace(path: Path) -> WorkspaceSetupResult:

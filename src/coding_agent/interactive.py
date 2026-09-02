@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime
 from typing import Callable, TextIO
 
-from .conversation import ConversationError, ConversationSession
+from .conversation import ConversationError, ConversationSession, SessionInfo
 from .domain import RunResult, RunStatus
 from .terminal import CommandChoice, TerminalPrompt
 
@@ -14,7 +15,8 @@ from .terminal import CommandChoice, TerminalPrompt
 _COMMANDS = (
     CommandChoice("/help", "Show this help."),
     CommandChoice("/workspace", "Show the active repository root."),
-    CommandChoice("/session", "Show the resumable session ID."),
+    CommandChoice("/session", "Show the short reference and full session ID."),
+    CommandChoice("/resume", "Choose another session in this workspace."),
     CommandChoice("/history", "Show persisted turns from this session."),
     CommandChoice("/clear", "Clear an ANSI-capable terminal."),
     CommandChoice("/exit", "End the session."),
@@ -92,7 +94,8 @@ class InteractiveSession:
         return self.prompt.readline(self._style("coding-agent> ", "36"))
 
     def _handle_command(self, raw: str) -> bool:
-        command = raw.lower()
+        command_text, _, argument = raw.partition(" ")
+        command = command_text.lower()
         if command in {"/exit", "/quit"}:
             self._render_exit()
             return True
@@ -108,7 +111,13 @@ class InteractiveSession:
             self._write(f"Workspace: {self.workspace}\n")
             return False
         if command == "/session":
-            self._write(f"Session ID: {self.conversation.session_id}\n")
+            self._write(
+                f"Session: {self.conversation.reference} "
+                f"(full: {self.conversation.session_id})\n"
+            )
+            return False
+        if command == "/resume":
+            self._resume_session(argument.strip() or None)
             return False
         if command == "/history":
             self._render_history()
@@ -127,7 +136,7 @@ class InteractiveSession:
             self._style("Bounded Coding Agent", "1;36")
             + f"\nWorkspace: {self.workspace}"
             + f"\nModel: {self.model_label}"
-            + f"\nSession: {self.conversation.session_id} "
+            + f"\nSession: {self.conversation.reference} "
             + ("(resumed)" if self.conversation.resumed else "(new)")
             + "\nType / to browse commands, or /exit to quit.\n\n"
         )
@@ -160,8 +169,49 @@ class InteractiveSession:
     def _render_exit(self) -> None:
         self._write(
             "\nSession ended. Resume with: coding-agent resume "
-            f"{self.conversation.session_id}\n"
+            f"{self.conversation.reference}\n"
         )
+
+    def _resume_session(self, reference: str | None) -> None:
+        try:
+            sessions = self.conversation.resumable_sessions(limit=20)
+        except ConversationError as exc:
+            self._write(f"Could not list saved sessions: {exc}\n")
+            return
+        alternatives = tuple(
+            session
+            for session in sessions
+            if session.session_id != self.conversation.session_id
+        )
+        selected = reference
+        if selected is None:
+            if not alternatives:
+                self._write("No other sessions were found for this workspace.\n")
+                return
+            selected = self.prompt.select(
+                "Resume session",
+                tuple(
+                    CommandChoice(session.reference, _session_description(session))
+                    for session in alternatives
+                ),
+            )
+            if selected is None:
+                self._write("Resume cancelled.\n")
+                return
+
+        try:
+            resumed = self.conversation.switch(selected)
+        except ConversationError as exc:
+            self._write(f"Could not resume session: {exc}\n")
+            return
+        self.conversation = resumed
+        self.workspace = resumed.workspace
+        info = next(
+            (item for item in sessions if item.session_id == resumed.session_id),
+            None,
+        )
+        suffix = f" · {_session_description(info)}" if info is not None else ""
+        self._write(f"Resumed session {resumed.reference}{suffix}\n")
 
     def _detect_styling(self) -> bool:
         is_tty = getattr(self.output, "isatty", lambda: False)()
@@ -188,3 +238,26 @@ def _status_color(status: RunStatus) -> str:
     if status is RunStatus.CANCELLED:
         return "36"
     return "31"
+
+
+def _session_description(session: SessionInfo) -> str:
+    timestamp = session.last_turn_at or session.created_at
+    time_label = _local_time(timestamp)
+    request = _one_line(session.last_request) if session.last_request else "no completed request"
+    turn_label = "turn" if session.turn_count == 1 else "turns"
+    return f"{time_label} · {session.turn_count} {turn_label} · last: {request}"
+
+
+def _local_time(value: str) -> str:
+    try:
+        return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return "unknown time"
+
+
+def _one_line(value: str, *, limit: int = 80) -> str:
+    printable = "".join(character if character.isprintable() else " " for character in value)
+    normalized = " ".join(printable.split()) or "[empty]"
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3] + "..."

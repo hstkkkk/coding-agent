@@ -167,13 +167,15 @@ interactive session records the result and continues regardless of status.
 ```python
 class ConversationStore:
     def create(self, workspace: Path) -> ConversationSession: ...
-    def resume(self, session_id: str, workspace: Path) -> ConversationSession: ...
+    def resume(self, reference: str, workspace: Path) -> ConversationSession: ...
     def list_sessions(self, *, workspace: Path | None, limit: int) -> tuple[SessionInfo, ...]: ...
 
 class ConversationSession:
     def prepare(self, request: str) -> PreparedConversation: ...
     def record(self, request: str, result: RunResult) -> None: ...
     def history(self, *, limit: int = 20) -> ConversationHistory: ...
+    def resumable_sessions(self, *, limit: int = 20) -> tuple[SessionInfo, ...]: ...
+    def switch(self, reference: str) -> ConversationSession: ...
 ```
 
 The CLI decides where sessions live and supplies a redactor and context limits.
@@ -196,10 +198,19 @@ assistant outcome, terminal status, run ID, and changed-path names. It never
 serializes verification records, approval decisions, tool observations,
 controller budgets, or live engine state.
 
-Resume requires the caller's canonical workspace to match the creation record.
-Thus a valid session ID cannot move historical text into a different target
-repository. Completed turns are resumable; a run interrupted before producing
-a `RunResult` is deliberately not checkpointed.
+Resume accepts a full ID or a 2–32 character hexadecimal prefix. Prefix
+resolution happens inside `ConversationStore`, considers only sessions bound to
+the caller's canonical workspace, and succeeds only for one match. Zero matches
+and ambiguous matches are distinct errors; ambiguity reports collision-safe
+candidate references. Full IDs remain compatible. Thus a valid reference cannot
+move historical text into a different target repository. Completed turns are
+resumable; a run interrupted before producing a `RunResult` is deliberately not
+checkpointed.
+
+`SessionInfo` contains a collision-safe display reference, the last completed
+turn timestamp, and the last redacted user request in addition to counts and
+workspace. Presentation adapters convert the UTC timestamp to local time and
+bound the request to one line; callers never parse JSONL to discover sessions.
 
 ### Automatic context compaction
 
@@ -245,8 +256,12 @@ a fake `run_task`; production uses the durable session and
 7. Continue until `/exit`, `/quit`, or EOF.
 
 `/history` reads persisted recent turns and reports how many earlier turns are
-in compacted memory. `/session` prints the resume ID. The banner distinguishes
-new from resumed sessions, and exit prints the exact resume command.
+in compacted memory. `/session` prints the short reference and full ID.
+`/resume` uses the terminal's reusable highlighted-choice interface over
+same-workspace `SessionInfo` values; `/resume <prefix>` bypasses the selector.
+Switching replaces only `ConversationSession`, because every offered session is
+bound to the already-constructed runner's workspace. The banner distinguishes
+new from resumed sessions, and exit prints the short resume command.
 
 The terminal uses ANSI styling only when output is a TTY and `NO_COLOR` is not
 set. Plain text is the complete fallback, which keeps Windows and redirected
@@ -305,7 +320,7 @@ not the display wrapping, identifies the exact operation.
 
 `build_parser` exposes `tui` with the same workspace, model, budget, approval,
 and allow-program options as `run`, except `task` and `--json`. It also exposes
-`resume SESSION_ID` with the interactive options and `sessions` for discovery.
+`resume REFERENCE` with the interactive options and `sessions` for discovery.
 
 `main` normalizes an empty argument list to `tui`, so:
 
@@ -354,8 +369,10 @@ a one-time `uv tool install --editable <project>` for users who want bare
 - Objectives and persisted event strings replace unpaired Unicode surrogates at
   their shared boundary, preventing malformed redirected input from crashing
   UTF-8 logs or reaching the model protocol unchanged.
-- Persistent session IDs are non-path 32-hex values, resume is workspace-bound,
-  and replay rejects malformed, oversized, reordered, or unsupported records.
+- Persistent session IDs are non-path 32-hex values. User references are
+  validated hexadecimal prefixes, prefix resolution is unique and
+  workspace-bound, and replay rejects malformed, oversized, reordered, or
+  unsupported records.
 - Session text is redacted before append; restored turns are explicitly
   untrusted and omit approvals, verification evidence, and controller state.
 - Per-session file locking prevents overlapping record writes. Compaction is a
@@ -388,6 +405,10 @@ added solely for tests.
   context;
 - a second `InteractiveSession` can resume the ID and receives both the prior
   request and assistant outcome;
+- unique short references resolve, ambiguous prefixes are rejected, and session
+  summaries expose the last request and timestamp;
+- `/resume` selects a same-workspace session and switches context without
+  invoking the agent runner;
 - old turns compact automatically, the checkpoint survives replay, and the
   current request plus context never exceeds the hard objective bound;
 - wrong-workspace and traversal-shaped session IDs are rejected;

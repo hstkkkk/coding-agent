@@ -60,6 +60,20 @@ class TerminalPromptTests(unittest.TestCase):
         self.assertEqual(result, "/history x\n")
         self.assertIn("coding-agent> /history", output.getvalue())
 
+    def test_select_reuses_highlighted_menu_for_session_choices(self) -> None:
+        output = io.StringIO()
+        prompt = self._prompt([TerminalKey.DOWN, TerminalKey.ENTER], output)
+        choices = (
+            CommandChoice("ae9ad21e", "11:45 · no completed request"),
+            CommandChoice("93df3b75", "11:35 · last: Fix parser tests"),
+        )
+
+        result = prompt.select("Resume session", choices)
+
+        self.assertEqual(result, "93df3b75")
+        self.assertIn("\x1b[7m93df3b75", output.getvalue())
+        self.assertIn("Fix parser tests", output.getvalue())
+
     def test_typing_filters_the_menu_and_backspace_edits_filter(self) -> None:
         output = io.StringIO()
         prompt = self._prompt(

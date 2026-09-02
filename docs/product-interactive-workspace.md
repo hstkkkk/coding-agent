@@ -18,7 +18,7 @@ It provides eight connected capabilities:
 6. conversational and read-only questions return a direct `ANSWERED` result
    without requiring a fake workspace change;
 7. completed conversation turns persist across terminal processes and can be
-   resumed by session ID;
+   resumed by a short reference or full session ID;
 8. older context is compacted automatically before it exceeds the configured
    prompt budget.
 
@@ -192,17 +192,22 @@ repository, then exits with the existing status-specific exit code.
 
 ### Resume a conversation
 
-The banner and `/session` expose a neutral 32-character session ID. From the
-same repository, a later terminal can continue it:
+The banner and `/session` expose a short session reference. From the same
+repository, a later terminal can continue it using any unique hexadecimal
+prefix of at least two characters:
 
 ```powershell
-coding-agent resume 7e02e19a9ec44ad5b1e52c5f49f3ed3
+coding-agent resume 7e
 ```
 
-`coding-agent sessions` lists recent sessions, and `--workspace` filters the
-list. A resume request is rejected if the supplied workspace is not the
-canonical workspace recorded when the session was created. This prevents
-history from one repository being injected into another.
+`coding-agent sessions` lists recent sessions with a collision-safe short
+reference, local time, turn count, and the latest user request; `--workspace`
+filters the list. Inside the TUI, `/resume` opens an arrow-key selector showing
+the same identifying information, while `/resume <prefix>` switches directly.
+An ambiguous prefix is rejected and shows longer candidate references. A resume
+request is rejected if the supplied workspace is not the canonical workspace
+recorded when the session was created. This prevents history from one repository
+being injected into another.
 
 ### Session commands
 
@@ -212,7 +217,8 @@ The initial terminal UI supports:
 |---|---|
 | `/help` | Show commands and interaction rules. |
 | `/workspace` | Show the canonical workspace path. |
-| `/session` | Show the resumable session ID. |
+| `/session` | Show the resumable short reference and full session ID. |
+| `/resume [prefix]` | Choose or directly resume another session in this workspace. |
 | `/history` | Show persisted recent tasks, statuses, and run IDs. |
 | `/clear` | Clear the terminal when ANSI control is available. |
 | `/exit`, `/quit` | End the session successfully. |
@@ -306,7 +312,9 @@ subprocesses receive a filtered environment and never run through a shell.
 - Approval initially stays bounded, `d` reveals full redacted arguments, and
   Enter without an affirmative answer denies the operation.
 - `/history` shows the resulting run ID and terminal status.
-- A completed turn can be resumed from a second CLI process by session ID.
+- A completed turn can be resumed from a second CLI process by session reference.
+- A unique short prefix resumes from CLI or TUI; ambiguous prefixes fail safely.
+- Session discovery shows local time and the latest user request.
 - Resume from a different canonical workspace is rejected before agent startup.
 - Context remains under the configured hard limit and older turns compact
   automatically while recent turns remain readable.

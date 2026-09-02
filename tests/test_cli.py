@@ -74,6 +74,16 @@ class CliTests(unittest.TestCase):
             workspace.mkdir()
             sessions_root = root / "sessions"
             session = ConversationStore(sessions_root, Redactor()).create(workspace)
+            session.record(
+                "Fix parser tests",
+                RunResult(
+                    run_id="b" * 32,
+                    status=RunStatus.ANSWERED,
+                    summary="Explained the parser.",
+                    changed_files=(),
+                    verifications=(),
+                ),
+            )
             stdout = io.StringIO()
 
             with (
@@ -83,7 +93,10 @@ class CliTests(unittest.TestCase):
                 exit_code = main(["sessions", "--workspace", str(workspace)])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn(session.session_id, stdout.getvalue())
+        rendered = stdout.getvalue()
+        self.assertIn(session.session_id[:8], rendered)
+        self.assertNotIn(session.session_id, rendered)
+        self.assertIn("Fix parser tests", rendered)
 
     def test_parser_reads_explicit_thinking_mode_from_environment(self) -> None:
         with patch.dict(

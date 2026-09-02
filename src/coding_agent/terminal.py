@@ -64,6 +64,38 @@ class TerminalPrompt:
         with self._input_mode():
             return self._read_edited_line(prompt)
 
+    def select(
+        self,
+        title: str,
+        choices: tuple[CommandChoice, ...],
+    ) -> str | None:
+        """Select one value, with a line-mode fallback for redirected input."""
+
+        if not choices:
+            return None
+        if not self.interactive:
+            width = max(len(choice.command) for choice in choices)
+            self._write(f"{title}:\n")
+            for choice in choices:
+                self._write(
+                    f"  {choice.command:<{width}}  {choice.description}\n"
+                )
+            self._write("Session reference (blank to cancel): ", flush=True)
+            value = self.input.readline().strip()
+            return value or None
+
+        self._write(f"{title}:", flush=True)
+        with self._input_mode():
+            selection = self._select_choices(
+                title=title,
+                choices=choices,
+                query_prefix="",
+                enter_action="select",
+                cancel_message="Selection cancelled.",
+                search_descriptions=True,
+            )
+        return selection if isinstance(selection, str) else None
+
     def _read_edited_line(self, prompt: str) -> str:
         buffer: list[str] = []
         cursor = 0
@@ -123,14 +155,48 @@ class TerminalPrompt:
             )
 
     def _select_command(self) -> str | TerminalKey:
+        return self._select_choices(
+            title="Commands",
+            choices=self.commands,
+            query_prefix="/",
+            enter_action="complete",
+            cancel_message="Command menu cancelled.",
+            search_descriptions=False,
+        )
+
+    def _select_choices(
+        self,
+        *,
+        title: str,
+        choices: tuple[CommandChoice, ...],
+        query_prefix: str,
+        enter_action: str,
+        cancel_message: str,
+        search_descriptions: bool,
+    ) -> str | TerminalKey:
         query = ""
         selected = 0
-        menu_lines = max(1, len(self.commands)) + 2
+        menu_lines = max(1, len(choices)) + 2
         self._write("\n")
-        self._render_command_menu(query, selected, menu_lines, redraw=False)
+        self._render_choice_menu(
+            title=title,
+            choices=choices,
+            query=query,
+            query_prefix=query_prefix,
+            selected=selected,
+            menu_lines=menu_lines,
+            enter_action=enter_action,
+            search_descriptions=search_descriptions,
+            redraw=False,
+        )
         while True:
             key = self._next_key()
-            matches = self._matching_commands(query)
+            matches = self._matching_choices(
+                choices,
+                query,
+                query_prefix=query_prefix,
+                search_descriptions=search_descriptions,
+            )
             if key is TerminalKey.INTERRUPT:
                 raise KeyboardInterrupt
             if key is TerminalKey.EOF:
@@ -139,7 +205,7 @@ class TerminalPrompt:
                 return TerminalKey.EOF
             if key is TerminalKey.ESCAPE:
                 self._close_command_menu(menu_lines)
-                self._write("Command menu cancelled.\n", flush=True)
+                self._write(cancel_message + "\n", flush=True)
                 return TerminalKey.ESCAPE
             if key is TerminalKey.BACKSPACE:
                 if query:
@@ -147,7 +213,7 @@ class TerminalPrompt:
                     selected = 0
                 else:
                     self._close_command_menu(menu_lines)
-                    self._write("Command menu cancelled.\n", flush=True)
+                    self._write(cancel_message + "\n", flush=True)
                     return TerminalKey.ESCAPE
             elif key in {TerminalKey.DOWN, TerminalKey.TAB}:
                 if matches:
@@ -159,7 +225,7 @@ class TerminalPrompt:
                 if matches:
                     command = matches[selected].command
                 else:
-                    command = "/" + query
+                    command = query_prefix + query
                 self._close_command_menu(menu_lines)
                 return command
             elif isinstance(key, str) and _is_printable(key):
@@ -168,33 +234,72 @@ class TerminalPrompt:
             else:
                 continue
 
-            matches = self._matching_commands(query)
+            matches = self._matching_choices(
+                choices,
+                query,
+                query_prefix=query_prefix,
+                search_descriptions=search_descriptions,
+            )
             if matches:
                 selected %= len(matches)
             else:
                 selected = 0
-            self._render_command_menu(query, selected, menu_lines, redraw=True)
+            self._render_choice_menu(
+                title=title,
+                choices=choices,
+                query=query,
+                query_prefix=query_prefix,
+                selected=selected,
+                menu_lines=menu_lines,
+                enter_action=enter_action,
+                search_descriptions=search_descriptions,
+                redraw=True,
+            )
 
-    def _matching_commands(self, query: str) -> list[CommandChoice]:
-        prefix = "/" + query.casefold()
+    @staticmethod
+    def _matching_choices(
+        choices: tuple[CommandChoice, ...],
+        query: str,
+        *,
+        query_prefix: str,
+        search_descriptions: bool,
+    ) -> list[CommandChoice]:
+        prefix = (query_prefix + query).casefold()
+        needle = query.casefold()
         return [
             choice
-            for choice in self.commands
+            for choice in choices
             if choice.command.casefold().startswith(prefix)
+            or (
+                search_descriptions
+                and needle
+                and needle in choice.description.casefold()
+            )
         ]
 
-    def _render_command_menu(
+    def _render_choice_menu(
         self,
+        *,
+        title: str,
+        choices: tuple[CommandChoice, ...],
         query: str,
+        query_prefix: str,
         selected: int,
         menu_lines: int,
-        *,
+        enter_action: str,
+        search_descriptions: bool,
         redraw: bool,
     ) -> None:
-        matches = self._matching_commands(query)
-        width = max((len(choice.command) for choice in self.commands), default=0)
+        matches = self._matching_choices(
+            choices,
+            query,
+            query_prefix=query_prefix,
+            search_descriptions=search_descriptions,
+        )
+        width = max((len(choice.command) for choice in choices), default=0)
         rows = [
-            "Commands (↑/↓ select, Enter complete, type to filter, Esc cancel):"
+            f"{title} (↑/↓ select, Enter {enter_action}, type to filter, "
+            "Esc cancel):"
         ]
         if matches:
             for index, choice in enumerate(matches):
@@ -206,7 +311,7 @@ class TerminalPrompt:
             rows.append("  No matching command")
         while len(rows) < menu_lines - 1:
             rows.append("")
-        rows.append(f"Filter: /{query}" if query else "Filter: /")
+        rows.append(f"Filter: {query_prefix}{query}")
 
         if redraw:
             self._write(f"\x1b[{menu_lines}A")

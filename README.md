@@ -159,7 +159,8 @@ Session commands:
 ```text
 /help       show commands
 /workspace  show the active repository root
-/session    show the resumable session ID
+/session    show the short reference and full session ID
+/resume     choose and resume another session in this workspace
 /history    show persisted recent tasks, statuses, and run IDs
 /clear      clear an ANSI-capable terminal
 /exit       end the session
@@ -193,19 +194,23 @@ Use the explicit subcommand when passing startup options:
 coding-agent tui --allow-program python --max-turns 40
 ```
 
-The banner prints a session ID. After exiting, resume from the same repository:
+The banner prints a short session reference. After exiting, resume from the
+same repository using any unique hexadecimal prefix of at least two characters:
 
 ```powershell
-coding-agent resume <session-id>
+coding-agent resume 93
 ```
 
-Discover recent IDs with `coding-agent sessions`, optionally filtered with
-`--workspace C:/path/to/project`. Resume rejects a different canonical
-workspace. When older history crosses the configured target, the controller
-automatically compacts it into bounded structured memory and reports the event.
-The append-only JSONL remains available for audit, but restored text is
-untrusted context only and never restores a partially completed run,
-permissions, approvals, or verification evidence.
+`coding-agent sessions`, optionally filtered with `--workspace`, shows each
+unique short reference, local activity time, turn count, and last user request.
+Inside the TUI, `/resume` opens an arrow-key selector with the same information;
+`/resume 93` switches directly. Ambiguous prefixes are rejected with candidate
+references. Resume still rejects a different canonical workspace. When older
+history crosses the configured target, the controller automatically compacts it
+into bounded structured memory and reports the event. The append-only JSONL
+remains available for audit, but restored text is untrusted context only and
+never restores a partially completed run, permissions, approvals, or
+verification evidence.
 
 ## One-shot run
 

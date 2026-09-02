@@ -18,6 +18,8 @@ from .events import Redactor
 
 _SCHEMA_VERSION = 1
 _SESSION_ID = re.compile(r"^[0-9a-f]{32}$")
+_SESSION_REFERENCE = re.compile(r"^[0-9a-fA-F]{2,32}$")
+_DISPLAY_REFERENCE_LENGTH = 8
 _MAX_SESSION_BYTES = 16 * 1024 * 1024
 _MAX_RECORD_CHARS = 64 * 1024
 _MAX_STORED_TEXT = 20_000
@@ -83,9 +85,12 @@ class PreparedConversation:
 @dataclass(frozen=True, slots=True)
 class SessionInfo:
     session_id: str
+    reference: str
     workspace: Path
     created_at: str
     updated_at: str
+    last_turn_at: str | None
+    last_request: str | None
     turn_count: int
     compacted_turns: int
 
@@ -163,14 +168,19 @@ class ConversationStore:
             return ConversationSession(self, state, resumed=False)
         raise ConversationError("could not allocate a unique session id")
 
-    def resume(self, session_id: str, workspace: Path) -> ConversationSession:
-        normalized = _validate_session_id(session_id)
+    def resume(self, reference: str, workspace: Path) -> ConversationSession:
         resolved_workspace = _resolve_workspace(workspace)
-        with self._locked(normalized):
-            state = self._load_unlocked(normalized)
+        session_id = self._resolve_session_reference(reference, resolved_workspace)
+        with self._locked(session_id):
+            state = self._load_unlocked(session_id)
         if not _same_path(state.workspace, resolved_workspace):
             raise ConversationError("session belongs to a different workspace")
         return ConversationSession(self, state, resumed=True)
+
+    def session_reference(self, session_id: str) -> str:
+        normalized = _validate_session_id(session_id)
+        identifiers = self._session_ids()
+        return _display_session_reference(normalized, identifiers)
 
     def list_sessions(
         self,
@@ -198,6 +208,7 @@ class ConversationStore:
                 continue
             candidates.append((modified, entry.name))
         candidates.sort(reverse=True)
+        identifiers = tuple(session_id for _, session_id in candidates)
 
         results: list[SessionInfo] = []
         for _, session_id in candidates:
@@ -214,9 +225,23 @@ class ConversationStore:
             results.append(
                 SessionInfo(
                     session_id=state.session_id,
+                    reference=_display_session_reference(
+                        state.session_id,
+                        identifiers,
+                    ),
                     workspace=state.workspace,
                     created_at=state.created_at,
                     updated_at=state.updated_at,
+                    last_turn_at=(
+                        state.recent_turns[-1].timestamp
+                        if state.recent_turns
+                        else None
+                    ),
+                    last_request=(
+                        state.recent_turns[-1].request
+                        if state.recent_turns
+                        else None
+                    ),
                     turn_count=state.total_turns,
                     compacted_turns=state.memory.compacted_turns,
                 )
@@ -224,6 +249,51 @@ class ConversationStore:
             if len(results) >= limit:
                 break
         return tuple(results)
+
+    def _resolve_session_reference(self, value: str, workspace: Path) -> str:
+        reference = _validate_session_reference(value)
+        if len(reference) == 32:
+            return reference
+
+        matches: list[str] = []
+        identifiers = self._session_ids()
+        for session_id in identifiers:
+            if not session_id.startswith(reference):
+                continue
+            try:
+                with self._locked(session_id):
+                    state = self._load_unlocked(session_id)
+            except ConversationError:
+                continue
+            if _same_path(state.workspace, workspace):
+                matches.append(session_id)
+
+        if not matches:
+            raise ConversationError(
+                f"no saved session in this workspace matches '{reference}'"
+            )
+        if len(matches) > 1:
+            candidates = ", ".join(
+                _display_session_reference(session_id, tuple(matches))
+                for session_id in matches[:5]
+            )
+            raise ConversationError(
+                f"session reference '{reference}' is ambiguous; "
+                f"use more characters (matches: {candidates})"
+            )
+        return matches[0]
+
+    def _session_ids(self) -> tuple[str, ...]:
+        if not self.root.is_dir():
+            return ()
+        try:
+            return tuple(
+                entry.name
+                for entry in self.root.iterdir()
+                if entry.is_dir() and _SESSION_ID.fullmatch(entry.name) is not None
+            )
+        except OSError as exc:
+            raise ConversationError("could not list saved sessions") from exc
 
     def _record(
         self,
@@ -430,6 +500,10 @@ class ConversationSession:
     def workspace(self) -> Path:
         return self._state.workspace
 
+    @property
+    def reference(self) -> str:
+        return self._store.session_reference(self.session_id)
+
     def prepare(self, request: str) -> PreparedConversation:
         self._state, prepared = self._store._prepare(
             self.session_id,
@@ -453,6 +527,12 @@ class ConversationSession:
             limit,
         )
         return history
+
+    def resumable_sessions(self, *, limit: int = 20) -> tuple[SessionInfo, ...]:
+        return self._store.list_sessions(workspace=self.workspace, limit=limit)
+
+    def switch(self, reference: str) -> ConversationSession:
+        return self._store.resume(reference, self.workspace)
 
 
 def _replay_records(
@@ -742,6 +822,28 @@ def _validate_session_id(value: str) -> str:
     if _SESSION_ID.fullmatch(normalized) is None:
         raise ConversationError("session id must be 32 lowercase hexadecimal characters")
     return normalized
+
+
+def _validate_session_reference(value: str) -> str:
+    normalized = str(value).strip()
+    if _SESSION_REFERENCE.fullmatch(normalized) is None:
+        raise ConversationError(
+            "session reference must be 2 to 32 hexadecimal characters"
+        )
+    return normalized.lower()
+
+
+def _display_session_reference(
+    session_id: str,
+    identifiers: tuple[str, ...],
+) -> str:
+    length = min(_DISPLAY_REFERENCE_LENGTH, len(session_id))
+    while length < len(session_id):
+        prefix = session_id[:length]
+        if sum(identifier.startswith(prefix) for identifier in identifiers) <= 1:
+            return prefix
+        length += 1
+    return session_id
 
 
 def _write_new_log(path: Path, record: dict[str, Any]) -> None:

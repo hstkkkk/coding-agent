@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from coding_agent.conversation import (
     ConversationError,
@@ -44,8 +46,28 @@ class ConversationStoreTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ConversationError, "different workspace"):
             store.resume(session.session_id, other_workspace)
-        with self.assertRaisesRegex(ConversationError, "session id"):
+        with self.assertRaisesRegex(ConversationError, "session reference"):
             store.resume("../outside", self.workspace)
+
+    def test_resume_accepts_unique_prefix_and_rejects_ambiguity(self) -> None:
+        store = ConversationStore(self.sessions_root, Redactor())
+        identifiers = (
+            uuid.UUID(hex="ab" + "1" * 30),
+            uuid.UUID(hex="ab" + "2" * 30),
+        )
+        with patch("coding_agent.conversation.uuid.uuid4", side_effect=identifiers):
+            first = store.create(self.workspace)
+            second = store.create(self.workspace)
+
+        self.assertEqual(store.resume("ab1", self.workspace).session_id, first.session_id)
+        self.assertEqual(
+            store.resume(second.session_id.upper(), self.workspace).session_id,
+            second.session_id,
+        )
+        with self.assertRaisesRegex(ConversationError, "ambiguous"):
+            store.resume("ab", self.workspace)
+        with self.assertRaisesRegex(ConversationError, "2 to 32"):
+            store.resume("a", self.workspace)
 
     def test_persistence_redacts_secrets_and_omits_verification_evidence(self) -> None:
         secret = "local-test-secret"
@@ -119,6 +141,9 @@ class ConversationStoreTests(unittest.TestCase):
         first_info = next(item for item in sessions if item.session_id == first.session_id)
         self.assertEqual(first_info.turn_count, 1)
         self.assertEqual(first_info.workspace, self.workspace.resolve())
+        self.assertEqual(first_info.reference, first.session_id[:8])
+        self.assertEqual(first_info.last_request, "first")
+        self.assertIsNotNone(first_info.last_turn_at)
 
     def test_current_request_is_bounded_even_without_prior_history(self) -> None:
         store = ConversationStore(self.sessions_root, Redactor())

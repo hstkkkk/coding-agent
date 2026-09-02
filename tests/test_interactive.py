@@ -86,7 +86,8 @@ class InteractiveSessionTests(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("/help", rendered)
         self.assertIn(str(self.workspace.resolve()), rendered)
-        self.assertIn("Session ID:", rendered)
+        self.assertIn("Session:", rendered)
+        self.assertIn("(full:", rendered)
         self.assertIn("No tasks have run in this session.", rendered)
         self.assertIn("Screen clearing is unavailable", rendered)
         self.assertIn("Unknown command: /unknown", rendered)
@@ -168,6 +169,31 @@ class InteractiveSessionTests(unittest.TestCase):
         self.assertIn("Who are you?", objectives[0])
         self.assertIn("summary-1", objectives[0])
         self.assertIn("resumed", output.getvalue().lower())
+
+    def test_resume_command_lists_metadata_and_switches_without_running_agent(self) -> None:
+        previous = self.store.create(self.workspace)
+        previous.record("Fix parser tests", self._result(1))
+        current = self.store.create(self.workspace)
+        output = io.StringIO()
+        session = InteractiveSession(
+            conversation=current,
+            model_label="test-model",
+            input_stream=io.StringIO(
+                f"/resume\n{previous.session_id[:8]}\n/history\n/exit\n"
+            ),
+            output_stream=output,
+            styled=False,
+        )
+
+        def unexpected(_: str) -> RunResult:
+            self.fail("resuming a session invoked the agent runner")
+
+        self.assertEqual(session.run(unexpected), 0)
+        self.assertEqual(session.conversation.session_id, previous.session_id)
+        rendered = output.getvalue()
+        self.assertIn("Resume session", rendered)
+        self.assertIn("Fix parser tests", rendered)
+        self.assertIn("Resumed session", rendered)
 
     @staticmethod
     def _result(index: int) -> RunResult:
