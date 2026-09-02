@@ -112,6 +112,34 @@ class EventAndContextTests(unittest.TestCase):
         )
         self.assertIn("index.html", rendered)
 
+    def test_console_reports_how_to_export_a_browser_screenshot(self) -> None:
+        output = io.StringIO()
+        screenshot_id = "b" * 32
+
+        with redirect_stdout(output):
+            ConsoleEventSink().emit(
+                RunEvent(
+                    run_id="a" * 32,
+                    sequence=1,
+                    kind="tool_finished",
+                    timestamp="now",
+                    data={
+                        "tool": "browser_check",
+                        "detail": "path=index.html · 1280x720",
+                        "status": "COMPLETED",
+                        "duration_ms": 20,
+                        "screenshot_id": screenshot_id,
+                    },
+                )
+            )
+
+        rendered = output.getvalue()
+        self.assertIn("[BROWSER]", rendered)
+        self.assertIn(
+            f"coding-agent export-screenshot {'a' * 32} {screenshot_id}",
+            rendered,
+        )
+
     def test_redacts_known_and_pattern_secrets_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"

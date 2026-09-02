@@ -12,6 +12,7 @@ from coding_agent.domain import ApprovalDecision, ErrorCode, ToolCall, ToolStatu
 from coding_agent.events import Redactor
 from coding_agent.policy import FixedApprovalAdapter
 from coding_agent.tools import LocalToolRuntime
+from coding_agent.tools.browser import BrowserRender
 
 
 class LocalToolRuntimeTests(unittest.TestCase):
@@ -232,6 +233,43 @@ class LocalToolRuntimeTests(unittest.TestCase):
         self.assertEqual(result.approval_wait_ms, 4_000)
         self.assertEqual(result.execution_ms, 125)
         self.assertEqual(result.duration_ms, 4_125)
+
+    def test_browser_check_records_redacted_dom_and_screenshot_evidence(self) -> None:
+        root = Path(self.temporary.name)
+        screenshot = root / "shot.png"
+        screenshot.write_bytes(b"\x89PNG\r\n\x1a\npreview")
+
+        class FakeBrowser:
+            def render(inner_self, **arguments):
+                return BrowserRender(
+                    screenshot_id="b" * 32,
+                    screenshot_path=screenshot,
+                    screenshot_bytes=screenshot.stat().st_size,
+                    width=1280,
+                    height=720,
+                    dom="<html>api_key=unit-test-secret-value</html>",
+                    duration_ms=25,
+                    output_truncated=False,
+                )
+
+        runtime = LocalToolRuntime(
+            workspace=self.workspace,
+            approvals=self.approvals,
+            artifacts=self.artifacts,
+            redactor=self.redactor,
+            browser=FakeBrowser(),
+        )
+        result = runtime.execute(
+            ToolCall("browser", "browser_check", {"path": "index.html"}),
+            "browser-action",
+        )
+
+        self.assertEqual(result.status, ToolStatus.COMPLETED)
+        self.assertTrue(result.data["rendered"])
+        self.assertEqual(result.data["screenshot_id"], "b" * 32)
+        self.assertNotIn("unit-test-secret-value", str(result.data))
+        self.assertIn("REDACTED", result.data["dom_preview"])
+        self.assertEqual(self.approvals.requests[-1].tool_name, "browser_check")
 
     def test_approval_request_is_concise_and_its_arguments_are_redacted(self) -> None:
         inline_code = "unit-test-secret-value" + ("x" * 2_000)

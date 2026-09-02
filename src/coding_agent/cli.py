@@ -94,6 +94,14 @@ def build_parser(settings: UserSettings | None = None) -> argparse.ArgumentParse
     recover_parser.add_argument("recovery_id")
     recover_parser.add_argument("--output", type=Path, required=True)
 
+    screenshot_parser = subparsers.add_parser(
+        "export-screenshot",
+        help="copy a saved browser screenshot to a new PNG file",
+    )
+    screenshot_parser.add_argument("run_id")
+    screenshot_parser.add_argument("screenshot_id")
+    screenshot_parser.add_argument("--output", type=Path, required=True)
+
     eval_parser = subparsers.add_parser("eval", help="run a repeatable local evaluation suite")
     eval_parser.add_argument("--suite", type=Path, required=True)
     _add_execution_arguments(eval_parser, settings)
@@ -119,7 +127,7 @@ def _add_agent_arguments(
         "--approval-mode",
         choices=("prompt", "deny"),
         default=_configured_value(settings, "approval_mode", default="prompt"),
-        help="how to handle commands and deletions not pre-authorized at startup",
+        help="how to handle execution and destructive writes not pre-authorized at startup",
     )
     parser.add_argument(
         "--allow-program",
@@ -240,6 +248,8 @@ def main(argv: list[str] | None = None) -> int:
             return _inspect_run(args)
         if args.command == "recover-file":
             return _recover_file(args)
+        if args.command == "export-screenshot":
+            return _export_screenshot(args)
         if args.command == "eval":
             return _eval(args)
     except (ConfigurationError, ConversationError, OSError) as exc:
@@ -352,7 +362,7 @@ def _build_local_runner(
     metadata = {
         "agent_version": __version__,
         "prompt_sha256": _prompt_hash(),
-        "tool_schema_version": "2",
+        "tool_schema_version": "3",
         "model_name": args.model,
         "thinking_mode": args.thinking or "provider_default",
         "endpoint_host": parsed_endpoint.hostname or "",
@@ -451,6 +461,9 @@ def _inspect_run(args: argparse.Namespace) -> int:
                     "    RECOVERY "
                     f"{data.get('recovery_path', 'file')} {recovery_id}"
                 )
+            screenshot_id = data.get("screenshot_id")
+            if isinstance(screenshot_id, str) and screenshot_id:
+                print(f"    SCREENSHOT {screenshot_id}")
         elif kind == "terminal":
             label = "ANSWER" if data.get("status") == "ANSWERED" else "DONE"
             print(
@@ -485,6 +498,39 @@ def _recover_file(args: argparse.Namespace) -> int:
     except FileExistsError as exc:
         raise ConfigurationError("recovery output already exists") from exc
     print(f"Recovered before-image to {output}")
+    return 0
+
+
+def _export_screenshot(args: argparse.Namespace) -> int:
+    _validate_hex_id(args.run_id, "run_id")
+    _validate_hex_id(args.screenshot_id, "screenshot_id")
+    source = (
+        _runs_root(args.configured_runs_dir)
+        / args.run_id
+        / "browser"
+        / f"{args.screenshot_id}.png"
+    )
+    try:
+        size = source.stat().st_size
+        if size <= 8 or size > 20 * 1024 * 1024:
+            raise ConfigurationError("browser screenshot has an invalid size")
+        content = source.read_bytes()
+    except FileNotFoundError as exc:
+        raise ConfigurationError("browser screenshot was not found") from exc
+    if not content.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ConfigurationError("browser screenshot is not a PNG file")
+
+    output = args.output.expanduser().resolve()
+    if not output.parent.is_dir():
+        raise ConfigurationError("screenshot output directory does not exist")
+    try:
+        with output.open("xb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError as exc:
+        raise ConfigurationError("screenshot output already exists") from exc
+    print(f"Exported browser screenshot to {output}")
     return 0
 
 
@@ -529,7 +575,7 @@ def _eval(args: argparse.Namespace) -> int:
             metadata={
                 "agent_version": __version__,
                 "prompt_sha256": _prompt_hash(),
-                "tool_schema_version": "2",
+                "tool_schema_version": "3",
                 "model_name": args.model,
                 "thinking_mode": args.thinking or "provider_default",
                 "endpoint_host": endpoint.hostname or "",

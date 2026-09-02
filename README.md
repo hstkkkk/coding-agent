@@ -41,6 +41,7 @@ without pretending that a code change was verified.
 - Git on `PATH`
 - An OpenAI-compatible `/chat/completions` endpoint with native tool calling
 - A local target workspace directory
+- Microsoft Edge, Google Chrome, or Chromium for visual Web verification
 
 ## Install
 
@@ -188,6 +189,7 @@ Progress lines identify the object being handled and the observable result:
 [MODEL] read_file · path=index.html
 [TOOL] read_file · path=index.html · lines=1-240 · 9821 chars -> COMPLETED (exec 2 ms)
 [MODEL] run_command · program=node · cwd=. · purpose=verify · 2 args · inline code=2140 chars
+[MODEL] browser_check · path=index.html · viewport=1280x720 · wait=500 ms
 ```
 
 For approved operations, progress reports actual execution separately from the
@@ -239,8 +241,8 @@ user's configured Git identity. Existing repositories are not modified during
 startup. A subdirectory of an enclosing repository is rejected; run from that
 repository's root instead.
 
-By default, command execution, whole-file replacement, and deletion require an
-exact interactive approval. Read-only tools and narrow hash-guarded edits run
+By default, command execution, browser rendering, whole-file replacement, and
+deletion require an exact interactive approval. Read-only tools and narrow hash-guarded edits run
 automatically. Before editing, replacing, or deleting an existing UTF-8 file, the
 controller stores a complete redacted before-image. If an exact recovery copy
 cannot be stored, the operation is rejected. The approval warns explicitly
@@ -300,6 +302,21 @@ The final completion gate reads the complete Git diff, including the contents
 of new untracked UTF-8 files. An empty or internally truncated diff cannot be
 used to claim success.
 
+For Web/UI/animation objectives, a syntax check is not sufficient evidence.
+The controller requires a fresh cited `browser_check`, which loads a local HTML
+entry point in Edge, Chrome, or Chromium with a disposable profile, captures a
+PNG, and stores the rendered DOM. Export the screenshot without overwriting an
+existing file:
+
+```powershell
+coding-agent export-screenshot <run-id> <screenshot-id> --output preview.png
+```
+
+The browser check proves that the current page rendered at the requested
+viewport; it does not claim that subjective appearance is correct. Browser
+scripts still execute with the current OS account and therefore require human
+approval.
+
 ## Test
 
 The default suite is deterministic, offline, and requires no API key:
@@ -308,7 +325,8 @@ The default suite is deterministic, offline, and requires no API key:
 python -m unittest discover -s tests -v
 ```
 
-It covers model protocol validation, completion gating, stale verification,
+It covers model protocol validation, completion gating, stale and browser
+verification,
 non-mutating answers, retry limits, path escape attempts, secret-file policy,
 edit conflicts, approval, subprocess behavior, output redaction, and a full
 real-tool loop in a temporary Git repository.

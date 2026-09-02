@@ -30,15 +30,23 @@ TOOL_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": True}
 
 
 class FakeToolRuntime:
-    def __init__(self, *, diff_chars: int = 10, diff_truncated: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        diff_chars: int = 10,
+        diff_truncated: bool = False,
+        changed_file: str = "app.py",
+    ) -> None:
         self.definitions = (
             ToolDefinition("edit_file", "edit", TOOL_SCHEMA, RiskLevel.WORKSPACE_WRITE),
             ToolDefinition("run_command", "run", TOOL_SCHEMA, RiskLevel.EXECUTION),
+            ToolDefinition("browser_check", "render", TOOL_SCHEMA, RiskLevel.EXECUTION),
             ToolDefinition("git_diff", "diff", TOOL_SCHEMA, RiskLevel.READ_ONLY),
         )
         self.calls: list[str] = []
         self.diff_chars = diff_chars
         self.diff_truncated = diff_truncated
+        self.changed_file = changed_file
 
     def initial_workspace_state(self):
         return {"git_available": True, "git_head": "abc", "git_status": ""}
@@ -51,7 +59,7 @@ class FakeToolRuntime:
                 call.name,
                 ToolStatus.COMPLETED,
                 "edited",
-                data={"workspace_changed": True, "changed_files": ["app.py"]},
+                data={"workspace_changed": True, "changed_files": [self.changed_file]},
             )
         if call.name == "run_command":
             return ToolResult(
@@ -63,7 +71,20 @@ class FakeToolRuntime:
                     "exit_code": 0,
                     "output_id": "a" * 32,
                     "workspace_changed": False,
-                    "changed_files": ["app.py"],
+                    "changed_files": [self.changed_file],
+                },
+            )
+        if call.name == "browser_check":
+            return ToolResult(
+                action_id,
+                call.name,
+                ToolStatus.COMPLETED,
+                "rendered",
+                data={
+                    "rendered": True,
+                    "screenshot_id": "b" * 32,
+                    "dom_output_id": "c" * 32,
+                    "path": "index.html",
                 },
             )
         return ToolResult(
@@ -114,6 +135,16 @@ def finish_from_context(request) -> AssistantTurn:
     return AssistantTurn(
         "finish with evidence",
         FinishRequest("c3", "task completed", (match.group(1),)),
+    )
+
+
+def finish_with_latest_evidence(request) -> AssistantTurn:
+    matches = re.findall(r'"verification_id": "([a-f0-9]{32})"', request.user_prompt)
+    if not matches:
+        raise AssertionError("verification id was not present in model context")
+    return AssistantTurn(
+        "finish with browser evidence",
+        FinishRequest("visual-finish", "visual task completed", (matches[-1],)),
     )
 
 
@@ -235,6 +266,34 @@ class AgentEngineTests(unittest.TestCase):
                     if event.kind == "verification_rejected"
                 ]
                 self.assertTrue(any("final Git diff" in reason for reason in reasons))
+
+    def test_visual_web_change_requires_cited_browser_verification(self) -> None:
+        tools = FakeToolRuntime(changed_file="index.html")
+        result, _, _, events = self.run_engine(
+            [
+                edit_turn(),
+                verify_turn(),
+                finish_from_context,
+                AssistantTurn(
+                    "render the current page",
+                    ToolCall("browser", "browser_check", {"path": "index.html"}),
+                ),
+                finish_with_latest_evidence,
+            ],
+            objective="改进网页版沙子游戏的视觉效果、动画和交互",
+            tools=tools,
+        )
+
+        self.assertEqual(result.status, RunStatus.SUCCEEDED)
+        self.assertEqual([item.kind for item in result.verifications], ["command", "browser"])
+        self.assertTrue(any("subjective visual quality" in item for item in result.warnings))
+        self.assertIn("browser_check", tools.calls)
+        reasons = [
+            event.data.get("reason", "")
+            for event in events.events
+            if event.kind == "verification_rejected"
+        ]
+        self.assertTrue(any("browser" in reason for reason in reasons))
 
     def test_old_verification_becomes_stale_after_another_edit(self) -> None:
         result, _, _, _ = self.run_engine(

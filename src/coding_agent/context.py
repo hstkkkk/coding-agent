@@ -32,6 +32,12 @@ verification evidence and you have inspected the resulting changes. Call
 report_blocked when an external requirement prevents safe progress. Never claim
 that an unverified coding task succeeded.
 
+For a visual web, UI, animation, or browser-interaction objective, call
+browser_check after the final web-file mutation and cite that browser
+verification when finishing. A syntax check alone is not visual evidence. The
+screenshot is local evidence for the human; do not claim subjective visual
+quality that the rendered DOM and screenshot do not establish.
+
 Do not repeat an unchanged read-only action: its prior observation is already
 available and the controller may skip or reject the duplicate. Re-read only
 after a workspace change or with a meaningfully different path, range, or
@@ -143,6 +149,7 @@ class ContextManager:
                 "exit_code": item.exit_code,
                 "workspace_version": item.workspace_version,
                 "passed": item.passed,
+                "kind": item.kind,
             }
             for item in state.verifications[-8:]
         ]

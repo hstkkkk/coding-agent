@@ -245,6 +245,12 @@ preserves auditability and prevents an indefinitely growing controller state.
 is not interchangeable with `SUCCEEDED`, which remains reserved for changed
 code backed by fresh verification and an inspectable diff.
 
+For a visual Web, game, animation, layout, or interaction request, command-line
+syntax evidence alone is insufficient. The current Web files must render in a
+local headless browser after the last mutation. The user receives an opaque
+screenshot reference and an export command for review; the product describes
+this as render evidence, not an automated judgment of visual quality.
+
 For follow-ups, a per-user session log stores redacted completed user requests,
 assistant outcomes, statuses, run IDs, and changed-path names. The full log is
 retained for audit, while the next request receives only a bounded derived view.

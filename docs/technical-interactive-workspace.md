@@ -45,6 +45,7 @@ AgentEngine event projection
 LocalToolRuntime approval
   |
   +--> PromptApprovalAdapter.request(request) -> ApprovalDecision
+  +--> BrowserRenderer.render(path) -> DOM + opaque screenshot ID
 ```
 
 These are deep modules: callers learn a small operation set while Git recovery,
@@ -346,6 +347,19 @@ exclusive creation. Git diff projection synthesizes unified patches for
 untracked UTF-8 files, and the controller accepts `finish` only after obtaining
 a complete, non-empty final diff artifact.
 
+Visual Web objectives have a specialized verification path. `browser_check`
+accepts one workspace-relative HTML file and a bounded viewport/wait, then a
+controller-resolved Edge, Chrome, or Chromium executable renders it with a
+disposable profile. The renderer blocks normal hostname resolution, disables
+background browser services, bounds time and PNG size, and validates the PNG
+dimensions. The redacted DOM enters the text artifact store; the screenshot
+stays in a restricted binary directory and the model receives only its opaque
+ID. The engine records a `browser` verification and requires the model to cite
+it when the current visual objective changed Web files. `export-screenshot`
+copies that PNG to a new caller-selected path without overwriting anything.
+This verifies rendering, not subjective visual quality, and browser JavaScript
+still executes under the user's OS account after explicit approval.
+
 ## CLI integration
 
 `build_parser` exposes `tui` with the same workspace, model, budget, approval,
@@ -458,6 +472,8 @@ added solely for tests.
 - long inline commands report only program, metadata, and code length in the
   initial progress/approval summary;
 - tool results report entry counts, changed paths, or exit codes;
+- visual Web completion rejects syntax-only evidence, while a successful local
+  browser render records DOM and screenshot evidence;
 - `d` exposes wrapped redacted arguments and the full digest before reprompting;
 - empty approval input denies and concise prompts stay bounded.
 
@@ -469,6 +485,8 @@ added solely for tests.
 - a two-process resume smoke test confirms model-visible conversation
   continuity while each turn still creates an independent run;
 - automatic initialization smoke test in a temporary non-Git directory;
+- an actual installed Edge/Chrome/Chromium smoke render validates PNG dimensions
+  and rendered DOM outside mocks;
 - `git diff --check` and a final repository status inspection.
 
 The tool schema version advances because `respond` and `ANSWERED` extend the

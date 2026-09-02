@@ -100,6 +100,43 @@ CONTROL_DEFINITIONS = (
     ),
 )
 
+_WEB_FILE_SUFFIXES = (
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".vue",
+    ".svelte",
+)
+_VISUAL_OBJECTIVE_TERMS = (
+    "web page",
+    "web app",
+    "website",
+    "frontend",
+    "user interface",
+    "visual",
+    "animation",
+    "layout",
+    "styling",
+    "interactive",
+    "interaction",
+    "canvas",
+    "game",
+    "网页",
+    "界面",
+    "视觉",
+    "动画",
+    "布局",
+    "样式",
+    "交互",
+    "游戏",
+    "质感",
+    "效果",
+)
+
 
 class SystemClock(Clock):
     def monotonic(self) -> float:
@@ -387,6 +424,7 @@ class AgentEngine:
             workspace_version=state.workspace_version,
             recovery_output_id=result.data.get("recovery_output_id"),
             recovery_path=result.data.get("recovery_path"),
+            screenshot_id=result.data.get("screenshot_id"),
         )
         return result.status is ToolStatus.CANCELLED
 
@@ -396,20 +434,38 @@ class AgentEngine:
         call: ToolCall,
         result: ToolResult,
     ) -> ToolResult:
-        if call.name != "run_command" or call.arguments.get("purpose") != "verify":
-            return result
-        verification_id = uuid.uuid4().hex
-        exit_code = result.data.get("exit_code")
-        record = VerificationRecord(
-            verification_id=verification_id,
-            command=(
+        if call.name == "run_command" and call.arguments.get("purpose") == "verify":
+            exit_code = result.data.get("exit_code")
+            command = (
                 str(call.arguments.get("program", "")),
                 *(str(item) for item in call.arguments.get("args", [])),
-            ),
+            )
+            passed = result.status is ToolStatus.COMPLETED and exit_code == 0
+            output_id = _optional_string(result.data.get("output_id"))
+            kind = "command"
+        elif call.name == "browser_check":
+            rendered = result.data.get("rendered") is True
+            exit_code = 0 if rendered else None
+            command = (
+                "browser_check",
+                str(call.arguments.get("path", "")),
+                f"{call.arguments.get('viewport_width', 1280)}x"
+                f"{call.arguments.get('viewport_height', 720)}",
+            )
+            passed = result.status is ToolStatus.COMPLETED and rendered
+            output_id = _optional_string(result.data.get("dom_output_id"))
+            kind = "browser"
+        else:
+            return result
+        verification_id = uuid.uuid4().hex
+        record = VerificationRecord(
+            verification_id=verification_id,
+            command=command,
             exit_code=exit_code if isinstance(exit_code, int) else None,
             workspace_version=state.workspace_version,
-            passed=result.status is ToolStatus.COMPLETED and exit_code == 0,
-            output_id=_optional_string(result.data.get("output_id")),
+            passed=passed,
+            output_id=output_id,
+            kind=kind,
         )
         state.verifications.append(record)
         updated_data = dict(result.data)
@@ -468,12 +524,20 @@ class AgentEngine:
             output_id=diff_result.data.get("output_id"),
             output_chars=output_chars,
         )
+        warnings = turn.action.warnings
+        if _requires_browser_verification(state):
+            review_warning = (
+                "Browser rendering passed; subjective visual quality still requires "
+                "human review of the saved screenshot."
+            )
+            if review_warning not in warnings:
+                warnings = (*warnings, review_warning)
         return self._terminal(
             state,
             emitter,
             RunStatus.SUCCEEDED,
             turn.action.summary,
-            warnings=turn.action.warnings,
+            warnings=warnings,
         )
 
     def _handle_answer(
@@ -531,6 +595,16 @@ class AgentEngine:
             for record in cited
         ):
             return "no cited successful verification belongs to the current workspace version"
+        if _requires_browser_verification(state) and not any(
+            record.kind == "browser"
+            and record.passed
+            and record.workspace_version == state.workspace_version
+            for record in cited
+        ):
+            return (
+                "visual web changes require a cited browser verification from "
+                "the current workspace version"
+            )
         return None
 
     def _check_budget(self, state: RunState, started: float) -> str | None:
@@ -647,6 +721,7 @@ class AgentEngine:
             summary=summary,
             changed_files=sorted(state.changed_files),
             error_code=error_code.value if error_code else None,
+            warnings=list(warnings),
         )
         return RunResult(
             run_id=state.run_id,
@@ -665,3 +740,14 @@ class AgentEngine:
 
 def _optional_string(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _requires_browser_verification(state: RunState) -> bool:
+    if not any(
+        path.casefold().endswith(_WEB_FILE_SUFFIXES) for path in state.changed_files
+    ):
+        return False
+    current_objective = state.objective.rsplit(
+        "\nCurrent request:\n", 1
+    )[-1].casefold()
+    return any(term in current_objective for term in _VISUAL_OBJECTIVE_TERMS)

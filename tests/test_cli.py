@@ -328,6 +328,46 @@ class CliTests(unittest.TestCase):
         self.assertEqual(second, 5)
         self.assertIn("already exists", stderr.getvalue())
 
+    def test_export_screenshot_copies_png_without_overwriting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs_root = root / "runs"
+            run_id = "a" * 32
+            screenshot_id = "b" * 32
+            source_dir = runs_root / run_id / "browser"
+            source_dir.mkdir(parents=True)
+            source = source_dir / f"{screenshot_id}.png"
+            source.write_bytes(b"\x89PNG\r\n\x1a\npreview")
+            output = root / "preview.png"
+
+            with patch("coding_agent.cli._runs_root", return_value=runs_root):
+                first = main(
+                    [
+                        "export-screenshot",
+                        run_id,
+                        screenshot_id,
+                        "--output",
+                        str(output),
+                    ]
+                )
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    second = main(
+                        [
+                            "export-screenshot",
+                            run_id,
+                            screenshot_id,
+                            "--output",
+                            str(output),
+                        ]
+                    )
+                exported = output.read_bytes()
+
+        self.assertEqual(first, 0)
+        self.assertEqual(exported, b"\x89PNG\r\n\x1a\npreview")
+        self.assertEqual(second, 5)
+        self.assertIn("already exists", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

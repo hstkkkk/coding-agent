@@ -35,13 +35,25 @@ permissions.
 - deterministic context compaction that restores only labeled untrusted
   requests/outcomes, never approval decisions, verification evidence, tool
   state, or an in-flight controller;
-- process-tree termination on timeout or cancellation.
+- process-tree termination on timeout or cancellation;
+- approved headless-browser rendering with a disposable profile, disabled
+  background services, bounded time and PNG size, and no model-visible local
+  screenshot path.
 
 Recovery artifacts use the same restricted run storage and redaction boundary
 as other artifacts. Because a redacted before-image would not be faithful, an
 existing-file mutation is rejected when secret filtering would alter the
 content. `recover-file` writes only to a new destination and refuses to
 overwrite an existing path.
+
+Browser rendering executes the target page's JavaScript. It therefore uses the
+same explicit execution approval boundary as other local code. Hostname
+resolution is disabled for the render and the profile is temporary, but this
+is not a network or OS sandbox; direct network addresses and resources allowed
+by the operating system remain a non-goal. Screenshots may contain sensitive
+page content. They stay in restricted local run storage, are identified to the
+model only by an opaque ID, and are copied out only through the exclusive-create
+`export-screenshot` command.
 
 `ANSWERED` is deliberately separate from verified coding success. The
 controller accepts `respond` only before any recorded workspace mutation, and

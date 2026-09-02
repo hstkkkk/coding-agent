@@ -118,13 +118,13 @@ partial action.
 
 ## Tool execution
 
-The model sees twelve local tools:
+The model sees thirteen local tools:
 
 ```text
 list_directory  read_file      search_text
 edit_file       write_file     create_file    delete_file
 run_command     git_status     git_diff
-read_output     search_output
+browser_check   read_output    search_output
 ```
 
 It also sees three controller actions: `respond`, `finish`, and
@@ -144,16 +144,24 @@ approval calls out pre-existing untracked targets because Git cannot restore
 them.
 
 Commands use a program-plus-argument array with `shell=False`. They receive a
-small environment allowlist that excludes the model API key. Command execution
-and deletion require approval unless a narrow startup policy pre-authorizes the
-executable. Output is bounded, redacted, stored as an artifact, and exposed to
-the model through previews and paged reads.
+small environment allowlist that excludes the model API key. Command execution,
+browser rendering, whole-file replacement, and deletion require approval unless
+a narrow startup policy pre-authorizes the executable. Output is bounded,
+redacted, stored as an artifact, and exposed to the model through previews and
+paged reads.
 
 Human progress events carry a bounded tool target/outcome rather than raw
 contents or command arguments. Approval shows the same concise description,
 the OS-account risk, and a short digest first. The user can request full
 redacted JSON arguments and the full digest before approving; only an explicit
 affirmative answer approves.
+
+`browser_check` resolves one workspace HTML file, launches a controller-chosen
+Edge, Chrome, or Chromium executable with a disposable profile, renders at a
+bounded viewport, stores the redacted DOM and a bounded local PNG, and creates
+a `browser` verification record. The screenshot is referenced to the model by
+an opaque ID rather than a local absolute path. Browser execution requires
+normal execution approval.
 
 ## State and context
 
@@ -198,6 +206,11 @@ The model's `finish` request is accepted only when:
 4. the controller can inspect a complete, non-empty final Git diff, including
    the contents of new untracked UTF-8 files.
 
+When changed Web files and the current objective indicate visual UI,
+animation, game, layout, or interaction work, the cited evidence must also
+include a successful `browser` verification for the current workspace version.
+A command syntax check alone cannot satisfy that specialized gate.
+
 The controller proves that the evidence ran against the current state; it does
 not claim that a finite test suite proves semantic correctness.
 
@@ -236,6 +249,8 @@ coding evaluation; `ANSWERED` is always a non-pass.
 - no checkpoint/resume for an in-flight run after a crash; only completed
   conversation turns can be resumed;
 - no automatic network isolation for approved subprocesses;
+- headless browser checks capture render evidence but do not semantically judge
+  subjective visual quality;
 - no parallel tools or multi-agent coordination;
 - line-oriented terminal UI rather than a full-screen editor;
 - no concurrent multi-process use of one conversation session;

@@ -161,6 +161,7 @@ class VerificationRecord:
     workspace_version: int
     passed: bool
     output_id: str | None = None
+    kind: str = "command"
 
 
 @dataclass(frozen=True, slots=True)

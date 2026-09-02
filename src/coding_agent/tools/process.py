@@ -48,9 +48,40 @@ class ProcessRunner:
     ) -> ProcessExecution:
         if not program or any(separator in program for separator in ("/", "\\")):
             raise ValueError("program must be a PATH-resolved executable name")
+        return self._run_command(
+            [program, *args],
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def run_executable(
+        self,
+        *,
+        executable: Path,
+        args: list[str],
+        cwd: Path,
+        timeout_seconds: int,
+    ) -> ProcessExecution:
+        """Run one controller-resolved executable that is not model-selected."""
+
+        resolved = executable.expanduser().resolve(strict=True)
+        if not resolved.is_file():
+            raise ValueError("executable path must name a file")
+        return self._run_command(
+            [str(resolved), *args],
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def _run_command(
+        self,
+        command: list[str],
+        *,
+        cwd: Path,
+        timeout_seconds: int,
+    ) -> ProcessExecution:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
-        command = [program, *args]
         environment = {
             key: value
             for key, value in os.environ.items()

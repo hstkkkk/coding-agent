@@ -20,6 +20,7 @@ from ..domain import (
 from ..events import Redactor
 from ..policy import PathPolicy, PolicyViolation, needs_approval, operation_digest
 from ..presentation import describe_tool
+from .browser import BrowserRenderer
 from .filesystem import EditConflict, FileTools, ToolInputError
 from .git import GitInspector
 from .process import ProcessRunner
@@ -47,6 +48,7 @@ class LocalToolRuntime(ToolRuntime):
         redactor: Redactor,
         default_command_timeout: int = 120,
         clock: Callable[[], float] = time.monotonic,
+        browser: BrowserRenderer | None = None,
     ) -> None:
         self.path_policy = PathPolicy(workspace)
         self.approvals = approvals
@@ -57,6 +59,10 @@ class LocalToolRuntime(ToolRuntime):
         self.files = FileTools(self.path_policy)
         self.git = GitInspector(self.path_policy.workspace)
         self.processes = ProcessRunner()
+        self.browser = browser or BrowserRenderer(
+            self.path_policy,
+            self.artifacts.root.parent / "browser",
+        )
         self._initial_git_status: str | None = None
         self._definitions = _definitions()
         self._definition_by_name = {item.name: item for item in self._definitions}
@@ -69,6 +75,7 @@ class LocalToolRuntime(ToolRuntime):
             "create_file": self.files.create_file,
             "delete_file": self.files.delete_file,
             "run_command": self._run_command,
+            "browser_check": self._browser_check,
             "git_status": self._git_status,
             "git_diff": self._git_diff,
             "read_output": self._read_output,
@@ -361,6 +368,38 @@ class LocalToolRuntime(ToolRuntime):
             "changed_files": list(snapshot.changed_files),
         }
 
+    def _browser_check(
+        self,
+        *,
+        path: str,
+        viewport_width: int = 1280,
+        viewport_height: int = 720,
+        wait_ms: int = 500,
+        timeout_seconds: int = 30,
+    ) -> dict[str, Any]:
+        rendered = self.browser.render(
+            path=path,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            wait_ms=wait_ms,
+            timeout_seconds=timeout_seconds,
+        )
+        dom = self.redactor.text(rendered.dom)
+        artifact = self.artifacts.write_text(dom)
+        return {
+            "path": path,
+            "rendered": True,
+            "screenshot_id": rendered.screenshot_id,
+            "screenshot_bytes": rendered.screenshot_bytes,
+            "viewport_width": rendered.width,
+            "viewport_height": rendered.height,
+            "browser_duration_ms": rendered.duration_ms,
+            "dom_output_id": artifact.output_id,
+            "dom_chars": artifact.original_chars,
+            "dom_preview": _preview(dom, 8_000),
+            "truncated": rendered.output_truncated or artifact.truncated,
+        }
+
     def _git_diff(self, *, staged: bool = False) -> dict[str, Any]:
         diff = self.redactor.text(self.git.diff(staged=staged))
         artifact = self.artifacts.write_text(diff)
@@ -586,6 +625,34 @@ def _definitions() -> tuple[ToolDefinition, ...]:
                     "purpose": {"type": "string", "enum": ["inspect", "verify", "operate"]},
                 },
                 required=["program", "args"],
+            ),
+            RiskLevel.EXECUTION,
+        ),
+        ToolDefinition(
+            "browser_check",
+            "Render one local HTML file in an isolated headless browser, save a "
+            "screenshot, and return the rendered DOM for visual-task verification.",
+            _object_schema(
+                {
+                    "path": path,
+                    "viewport_width": {
+                        "type": "integer",
+                        "minimum": 320,
+                        "maximum": 3840,
+                    },
+                    "viewport_height": {
+                        "type": "integer",
+                        "minimum": 240,
+                        "maximum": 2160,
+                    },
+                    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 5000},
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 120,
+                    },
+                },
+                required=["path"],
             ),
             RiskLevel.EXECUTION,
         ),

@@ -39,6 +39,13 @@ def describe_tool(tool_name: str, arguments: Mapping[str, Any]) -> str:
         return _path(arguments)
     if tool_name == "run_command":
         return _describe_command(arguments)
+    if tool_name == "browser_check":
+        width = arguments.get("viewport_width", 1280)
+        height = arguments.get("viewport_height", 720)
+        wait_ms = arguments.get("wait_ms", 500)
+        return _join(
+            [_path(arguments), f"viewport={width}x{height}", f"wait={wait_ms} ms"]
+        )
     if tool_name == "git_status":
         return "workspace"
     if tool_name == "git_diff":
@@ -90,6 +97,14 @@ def describe_tool_result(
             parts.append(f"exit={exit_code}")
         if data.get("workspace_changed") is True:
             parts.append("workspace changed")
+        return _join(parts)
+    if tool_name == "browser_check":
+        width = data.get("viewport_width", arguments.get("viewport_width", 1280))
+        height = data.get("viewport_height", arguments.get("viewport_height", 720))
+        size = data.get("screenshot_bytes")
+        parts = [_path(arguments), f"{width}x{height}"]
+        if isinstance(size, int):
+            parts.append(f"screenshot={size} bytes")
         return _join(parts)
     if tool_name == "git_status":
         changed = data.get("changed_files")

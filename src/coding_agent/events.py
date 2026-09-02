@@ -132,6 +132,13 @@ class ConsoleEventSink(EventSink):
                     "a new file with: coding-agent recover-file "
                     f"{event.run_id} {recovery_id} --output <path>"
                 )
+            screenshot_id = data.get("screenshot_id")
+            if isinstance(screenshot_id, str) and screenshot_id:
+                print(
+                    "[BROWSER] Screenshot saved. Export it with: "
+                    "coding-agent export-screenshot "
+                    f"{event.run_id} {screenshot_id} --output preview.png"
+                )
         elif event.kind == "verification_rejected":
             print(f"[VERIFY] rejected: {data.get('reason', '')}")
         elif event.kind == "answer_rejected":
@@ -148,6 +155,10 @@ class ConsoleEventSink(EventSink):
                 print(f"[ANSWER] {_console_text(data.get('summary', ''), limit=4_000)}")
             else:
                 print(f"[DONE] {data.get('status', 'UNKNOWN')}: {data.get('summary', '')}")
+            warnings = data.get("warnings")
+            if isinstance(warnings, list):
+                for warning in warnings:
+                    print(f"[WARNING] {_console_text(warning, limit=600)}")
         elif event.kind in {"retry", "warning"}:
             print(f"[{event.kind.upper()}] {_console_text(data.get('message', ''), limit=600)}")
 
