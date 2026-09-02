@@ -136,14 +136,31 @@ class ConversationStoreTests(unittest.TestCase):
 
         self.assertEqual(
             {item.session_id for item in sessions},
-            {first.session_id, second.session_id},
+            {first.session_id},
         )
+        self.assertNotIn(second.session_id, {item.session_id for item in sessions})
         first_info = next(item for item in sessions if item.session_id == first.session_id)
         self.assertEqual(first_info.turn_count, 1)
         self.assertEqual(first_info.workspace, self.workspace.resolve())
         self.assertEqual(first_info.reference, first.session_id[:8])
         self.assertEqual(first_info.last_request, "first")
         self.assertIsNotNone(first_info.last_turn_at)
+
+    def test_empty_session_can_be_discarded_without_deleting_a_completed_session(self) -> None:
+        store = ConversationStore(self.sessions_root, Redactor())
+        empty = store.create(self.workspace)
+        completed = store.create(self.workspace)
+        completed.record("kept", self._result(1, "done"))
+
+        self.assertTrue(empty.discard_if_empty())
+        self.assertFalse(completed.discard_if_empty())
+        self.assertFalse(
+            (self.sessions_root / empty.session_id / "session.jsonl").exists()
+        )
+        self.assertEqual(
+            {item.session_id for item in store.list_sessions(workspace=self.workspace)},
+            {completed.session_id},
+        )
 
     def test_current_request_is_bounded_even_without_prior_history(self) -> None:
         store = ConversationStore(self.sessions_root, Redactor())

@@ -222,6 +222,8 @@ class ConversationStore:
                 resolved_workspace,
             ):
                 continue
+            if state.total_turns == 0:
+                continue
             results.append(
                 SessionInfo(
                     session_id=state.session_id,
@@ -249,6 +251,28 @@ class ConversationStore:
             if len(results) >= limit:
                 break
         return tuple(results)
+
+    def _discard_empty(self, session_id: str, workspace: Path) -> bool:
+        path = self._session_path(session_id)
+        lock_path = path.with_suffix(".lock")
+        with self._locked(session_id):
+            state = self._load_unlocked(session_id)
+            _require_workspace(state, workspace)
+            if state.total_turns != 0:
+                return False
+            try:
+                path.unlink()
+            except OSError as exc:
+                raise ConversationError("could not discard empty session") from exc
+
+        try:
+            lock_path.unlink(missing_ok=True)
+            path.parent.rmdir()
+        except OSError:
+            # The log is already gone, so listings and resume ignore any
+            # lock/directory residue held briefly by another process.
+            pass
+        return True
 
     def _resolve_session_reference(self, value: str, workspace: Path) -> str:
         reference = _validate_session_reference(value)
@@ -533,6 +557,11 @@ class ConversationSession:
 
     def switch(self, reference: str) -> ConversationSession:
         return self._store.resume(reference, self.workspace)
+
+    def discard_if_empty(self) -> bool:
+        """Remove this session only when it has no completed turns."""
+
+        return self._store._discard_empty(self.session_id, self.workspace)
 
 
 def _replay_records(

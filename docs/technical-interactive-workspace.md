@@ -176,6 +176,7 @@ class ConversationSession:
     def history(self, *, limit: int = 20) -> ConversationHistory: ...
     def resumable_sessions(self, *, limit: int = 20) -> tuple[SessionInfo, ...]: ...
     def switch(self, reference: str) -> ConversationSession: ...
+    def discard_if_empty(self) -> bool: ...
 ```
 
 The CLI decides where sessions live and supplies a redactor and context limits.
@@ -211,6 +212,12 @@ checkpointed.
 turn timestamp, and the last redacted user request in addition to counts and
 workspace. Presentation adapters convert the UTC timestamp to local time and
 bound the request to one line; callers never parse JSONL to discover sessions.
+
+Zero-turn sessions are excluded from discovery. `discard_if_empty` replays the
+log under its session lock and removes it only when no completed turn exists;
+the TUI invokes it on exit and after a successful switch. This removes orphan
+sessions created by opening and immediately leaving the TUI without putting
+completed history at risk.
 
 ### Automatic context compaction
 

@@ -214,7 +214,10 @@ coding-agent resume 93
 unique short reference, local activity time, turn count, and last user request.
 Inside the TUI, `/resume` opens an arrow-key selector with the same information;
 `/resume 93` switches directly. Ambiguous prefixes are rejected with candidate
-references. Resume still rejects a different canonical workspace. When older
+references. Sessions with no completed turn are omitted from discovery and a
+new empty session is discarded on exit or after switching to an older session,
+so simply opening the TUI does not create resume-list clutter. Resume still
+rejects a different canonical workspace. When older
 history crosses the configured target, the controller automatically compacts it
 into bounded structured memory and reports the event. The append-only JSONL
 remains available for audit, but restored text is untrusted context only and

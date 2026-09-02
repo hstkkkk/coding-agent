@@ -28,6 +28,11 @@ own durable conversation identity, workspace binding, JSONL validation,
 redaction, and automatic context compaction. Their small interface prevents the
 terminal and CLI from depending on the persistence format.
 
+Session discovery contains only conversations with at least one completed
+turn. A just-created zero-turn session is safely discarded on exit or when the
+TUI switches to a saved conversation; completed session logs are never removed
+by that cleanup path.
+
 `InteractiveSession.run(run_task) -> int` owns the terminal grammar, slash
 commands, and presentation. It delegates history and bounded context to one
 `ConversationSession`; the repository remains authoritative and every request

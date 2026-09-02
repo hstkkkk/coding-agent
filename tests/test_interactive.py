@@ -94,8 +94,9 @@ class InteractiveSessionTests(unittest.TestCase):
 
     def test_eof_exits_without_running_a_task(self) -> None:
         output = io.StringIO()
+        conversation = self.store.create(self.workspace)
         session = InteractiveSession(
-            conversation=self.store.create(self.workspace),
+            conversation=conversation,
             model_label="test-model",
             input_stream=io.StringIO(""),
             output_stream=output,
@@ -103,7 +104,10 @@ class InteractiveSessionTests(unittest.TestCase):
         )
 
         self.assertEqual(session.run(lambda _: self._result(1)), 0)
-        self.assertIn("Session ended.", output.getvalue())
+        self.assertIn("No completed tasks; empty session was not saved.", output.getvalue())
+        self.assertFalse(
+            (self.store.root / conversation.session_id / "session.jsonl").exists()
+        )
 
     def test_keyboard_interrupt_at_prompt_keeps_session_open(self) -> None:
         output = io.StringIO()
@@ -190,6 +194,9 @@ class InteractiveSessionTests(unittest.TestCase):
 
         self.assertEqual(session.run(unexpected), 0)
         self.assertEqual(session.conversation.session_id, previous.session_id)
+        self.assertFalse(
+            (self.store.root / current.session_id / "session.jsonl").exists()
+        )
         rendered = output.getvalue()
         self.assertIn("Resume session", rendered)
         self.assertIn("Fix parser tests", rendered)

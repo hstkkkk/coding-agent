@@ -167,9 +167,18 @@ class InteractiveSession:
             )
 
     def _render_exit(self) -> None:
+        reference = self.conversation.reference
+        try:
+            discarded = self.conversation.discard_if_empty()
+        except ConversationError as exc:
+            self._write(f"\nCould not clean up empty session: {exc}\n")
+            discarded = False
+        if discarded:
+            self._write("\nNo completed tasks; empty session was not saved.\n")
+            return
         self._write(
             "\nSession ended. Resume with: coding-agent resume "
-            f"{self.conversation.reference}\n"
+            f"{reference}\n"
         )
 
     def _resume_session(self, reference: str | None) -> None:
@@ -204,6 +213,12 @@ class InteractiveSession:
         except ConversationError as exc:
             self._write(f"Could not resume session: {exc}\n")
             return
+        previous = self.conversation
+        if resumed.session_id != previous.session_id:
+            try:
+                previous.discard_if_empty()
+            except ConversationError as exc:
+                self._write(f"Could not clean up previous empty session: {exc}\n")
         self.conversation = resumed
         self.workspace = resumed.workspace
         info = next(
