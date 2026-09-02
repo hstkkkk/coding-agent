@@ -67,6 +67,12 @@ Internal seams have at least production and test adapters:
 Vendor responses, subprocess objects, and CLI rendering do not enter the core
 data model.
 
+The model adapter normally requires a tool call at the HTTP protocol layer.
+Providers that expose explicit Thinking mode may reject forced tool selection,
+so `thinking=enabled` uses automatic tool selection instead. This relaxes only
+the vendor request parameter: response normalization and `AgentEngine` still
+require exactly one allowlisted structured action before anything executes.
+
 ## Configuration startup
 
 Normal commands load `~/.coding-agent/settings.json` before workspace setup.

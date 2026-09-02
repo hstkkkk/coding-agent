@@ -95,6 +95,35 @@ class ModelAdapterTests(unittest.TestCase):
 
         assert adapter.last_payload is not None
         self.assertEqual(adapter.last_payload["thinking"], {"type": "disabled"})
+        self.assertEqual(adapter.last_payload["tool_choice"], "required")
+
+    def test_thinking_enabled_uses_compatible_automatic_tool_choice(self) -> None:
+        adapter = StubAdapter(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "function": {
+                                        "name": "respond",
+                                        "arguments": '{"message":"hello"}',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            thinking="enabled",
+        )
+
+        adapter.complete(ModelRequest("system", "task", (ANSWER_TOOL,)))
+
+        assert adapter.last_payload is not None
+        self.assertEqual(adapter.last_payload["thinking"], {"type": "enabled"})
+        self.assertEqual(adapter.last_payload["tool_choice"], "auto")
 
     def test_normalizes_finish_control_action(self) -> None:
         adapter = StubAdapter(

@@ -61,6 +61,11 @@ An explicit JSON `null` for `thinking` means “use the provider default” and
 overrides `CODING_AGENT_THINKING`. Other nullable-looking fields must be
 omitted rather than set to `null`.
 
+With `thinking` set to `"enabled"`, the HTTP adapter uses automatic rather than
+forced tool selection because Thinking-capable endpoints may reject
+`tool_choice="required"`. The local protocol remains strict: a response with
+zero, multiple, malformed, or unknown actions is rejected before execution.
+
 ## Precedence
 
 For a setting that has all four forms, the order is:

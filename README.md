@@ -130,8 +130,11 @@ export CODING_AGENT_THINKING="disabled"
 
 `CODING_AGENT_THINKING` accepts `enabled` or `disabled`. Leave it unset to
 preserve the provider default. The equivalent command-line option is
-`--thinking enabled|disabled`. See [docs/configuration.md](docs/configuration.md)
-for the complete schema, ranges, precedence rules, and security notes.
+`--thinking enabled|disabled`. When Thinking is enabled, the adapter uses
+automatic tool selection for compatibility and still requires exactly one
+valid structured action before the controller proceeds. See
+[docs/configuration.md](docs/configuration.md) for the complete schema, ranges,
+precedence rules, and security notes.
 
 ## Interactive terminal
 

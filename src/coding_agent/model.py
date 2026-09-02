@@ -63,7 +63,7 @@ class OpenAICompatibleAdapter(ModelPort):
                 {"role": "user", "content": request.user_prompt},
             ],
             "tools": [self._tool_payload(tool) for tool in request.tools],
-            "tool_choice": "required",
+            "tool_choice": "auto" if self.thinking == "enabled" else "required",
             "temperature": self.temperature,
         }
         if self.thinking is not None:
