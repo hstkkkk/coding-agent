@@ -155,8 +155,16 @@ The banner prints both the selected model and the effective configured thinking
 mode (`enabled`, `disabled`, or `provider default`) so model-quality experiments
 are auditable from the terminal itself.
 
+On an ANSI-capable terminal, the interface uses a compact welcome panel, a
+`❯` prompt, whole-row command highlighting, humanized action labels, and a
+consistent status hierarchy. A temporary `◇ Working…` indicator occupies one
+line while the model endpoint is responding and is replaced by the resulting
+action. This is still a scrollback-friendly terminal UI, not an alternate-screen
+application. Set `NO_COLOR=1`, or redirect stdout, to use the complete stable
+plain-text presentation.
+
 In an interactive terminal, typing `/` immediately opens the command list.
-Use the up/down arrows to move the reverse-video highlight, then press Enter to
+Use the up/down arrows to move the whole-row highlight, then press Enter to
 complete that command into the editable prompt. Continue editing if needed and
 press Enter again to submit. Typing while the menu is open filters the list.
 Redirected input keeps the plain line-oriented fallback. Ordinary typing and
@@ -180,10 +188,10 @@ the repository answers directly; a read-only repository question may inspect
 files first. Both end as `ANSWERED` and do not require a synthetic file change:
 
 ```text
-coding-agent> Who are you?
-[MODEL] respond
-[ANSWER] I am a bounded coding agent for this local workspace.
-[SESSION] ANSWERED | Run ID: ...
+❯ Who are you?
+● Answer
+◇ Answer  I am a bounded coding agent for this local workspace.
+  ↳ Run  ... · answered
 ```
 
 Once a run changes the workspace, `respond` is rejected and the run must use
@@ -192,15 +200,21 @@ verified `finish` or explicitly report why it is blocked.
 Progress lines identify the object being handled and the observable result:
 
 ```text
-[MODEL] read_file · path=index.html
-[TOOL] read_file · path=index.html · lines=1-240 · 9821 chars -> COMPLETED (exec 2 ms)
-[MODEL] run_command · program=node · cwd=. · purpose=verify · 2 args · inline code=2140 chars
-[MODEL] browser_check · path=index.html · viewport=1280x720 · wait=500 ms
+● Read  path=index.html
+  └ ✓ Read  path=index.html · lines=1-240 · 9821 chars · exec 2 ms
+● Run  program=node · cwd=. · purpose=verify · 2 args · inline code=2140 chars
+● Browser  path=index.html · viewport=1280x720 · wait=500 ms
 ```
 
+Approval uses the same visual language, but preserves explicit consent and the
+exact operation digest. The default card contains only the bounded action,
+request, risk, and digest; press `d` to inspect the complete redacted arguments
+before deciding.
+
 For approved operations, progress reports actual execution separately from the
-time spent waiting for the human, for example `(exec 125 ms, approval 4000
-ms)`. An identical consecutive read-only request is served by the existing
+time spent waiting for the human, for example `exec 125 ms, approval 4000 ms`
+(`(exec ..., approval ...)` in plain output). An identical consecutive
+read-only request is served by the existing
 observation once, then stopped with the dedicated `STAGNATION` error if the
 model ignores the corrective feedback. Exact protocol-rejection reasons are
 shown in bounded, redacted warnings rather than a generic failure line.

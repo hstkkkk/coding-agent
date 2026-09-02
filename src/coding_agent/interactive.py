@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime
 from typing import Callable, TextIO
 
 from .conversation import ConversationError, ConversationSession, SessionInfo
-from .domain import RunResult, RunStatus
+from .domain import RunResult
 from .terminal import CommandChoice, TerminalPrompt
+from .terminal_ui import TerminalTheme
 
 
 _COMMANDS = (
@@ -42,11 +42,13 @@ class InteractiveSession:
         self.thinking_label = thinking_label
         self.input = input_stream or sys.stdin
         self.output = output_stream or sys.stdout
-        self.styled = self._detect_styling() if styled is None else styled
+        self.theme = TerminalTheme.for_stream(self.output, enabled=styled)
+        self.styled = self.theme.enabled
         self.prompt = TerminalPrompt(
             commands=_COMMANDS,
             input_stream=self.input,
             output_stream=self.output,
+            styled=self.styled,
         )
 
     def run(self, run_task: Callable[[str], RunResult]) -> int:
@@ -72,28 +74,48 @@ class InteractiveSession:
             try:
                 prepared = self.conversation.prepare(request)
             except ConversationError as exc:
-                self._write(f"[SESSION] Could not prepare persistent context: {exc}\n")
+                self._write_session_error(
+                    f"Could not prepare persistent context: {exc}"
+                )
                 return 5
             if prepared.compacted_now:
-                self._write(
-                    f"[SESSION] Compacted {prepared.compacted_now} older turn(s) "
-                    "into persistent memory.\n"
+                message = (
+                    f"Compacted {prepared.compacted_now} older turn(s) "
+                    "into persistent memory."
                 )
+                if self.styled:
+                    self._write(self.theme.notice("Context", message) + "\n")
+                else:
+                    self._write(f"[SESSION] {message}\n")
             try:
                 result = run_task(prepared.objective)
             except KeyboardInterrupt:
-                self._write("\n[SESSION] Task interrupted; no success was recorded.\n")
+                if self.styled:
+                    self._write(
+                        "\n"
+                        + self.theme.notice(
+                            "Interrupted",
+                            "Task stopped; no success was recorded.",
+                            tone="warning",
+                        )
+                        + "\n"
+                    )
+                else:
+                    self._write(
+                        "\n[SESSION] Task interrupted; no success was recorded.\n"
+                    )
                 continue
 
             try:
                 self.conversation.record(request, result)
             except ConversationError as exc:
-                self._write(f"[SESSION] Could not persist completed turn: {exc}\n")
+                self._write_session_error(f"Could not persist completed turn: {exc}")
                 return 5
             self._render_result(result)
 
     def _readline(self) -> str:
-        return self.prompt.readline(self._style("coding-agent> ", "36"))
+        prompt = self.theme.prompt() if self.styled else "coding-agent> "
+        return self.prompt.readline(prompt)
 
     def _handle_command(self, raw: str) -> bool:
         command_text, _, argument = raw.partition(" ")
@@ -103,20 +125,33 @@ class InteractiveSession:
             return True
         if command == "/help":
             width = max(len(choice.command) for choice in _COMMANDS)
-            self._write("Commands:\n")
+            heading = (
+                self.theme.paint("Commands", "strong")
+                if self.styled
+                else "Commands:"
+            )
+            self._write(heading + "\n")
             for choice in _COMMANDS:
-                self._write(
-                    f"  {choice.command:<{width}}  {choice.description}\n"
-                )
+                command_label = f"{choice.command:<{width}}"
+                if self.styled:
+                    command_label = self.theme.paint(command_label, "accent")
+                self._write(f"  {command_label}  {choice.description}\n")
             return False
         if command == "/workspace":
-            self._write(f"Workspace: {self.workspace}\n")
+            if self.styled:
+                self._write(self.theme.notice("Workspace", str(self.workspace)) + "\n")
+            else:
+                self._write(f"Workspace: {self.workspace}\n")
             return False
         if command == "/session":
-            self._write(
-                f"Session: {self.conversation.reference} "
-                f"(full: {self.conversation.session_id})\n"
+            message = (
+                f"{self.conversation.reference} "
+                f"(full: {self.conversation.session_id})"
             )
+            if self.styled:
+                self._write(self.theme.notice("Session", message) + "\n")
+            else:
+                self._write(f"Session: {message}\n")
             return False
         if command == "/resume":
             self._resume_session(argument.strip() or None)
@@ -134,8 +169,26 @@ class InteractiveSession:
         return False
 
     def _render_banner(self) -> None:
+        if self.styled:
+            state = "resumed" if self.conversation.resumed else "new"
+            self._write(
+                self.theme.banner(
+                    "Bounded Coding Agent",
+                    (
+                        ("Workspace", str(self.workspace)),
+                        (
+                            "Model",
+                            f"{self.model_label} · thinking {self.thinking_label}",
+                        ),
+                        ("Session", f"{self.conversation.reference} · {state}"),
+                    ),
+                    "/ commands · /exit quit",
+                )
+                + "\n"
+            )
+            return
         self._write(
-            self._style("Bounded Coding Agent", "1;36")
+            "Bounded Coding Agent"
             + f"\nWorkspace: {self.workspace}"
             + f"\nModel: {self.model_label}"
             + f"\nThinking: {self.thinking_label}"
@@ -145,8 +198,28 @@ class InteractiveSession:
         )
 
     def _render_result(self, result: RunResult) -> None:
-        status = self._style(result.status.value, _status_color(result.status))
-        self._write(f"[SESSION] {status} | Run ID: {result.run_id}\n")
+        if self.styled:
+            tone = {
+                "SUCCEEDED": "success",
+                "ANSWERED": "info",
+                "BLOCKED": "warning",
+                "CANCELLED": "warning",
+                "FAILED": "danger",
+            }.get(result.status.value, "info")
+            self._write(
+                self.theme.notice(
+                    "Run",
+                    f"{result.run_id} · {result.status.value.lower()}",
+                    tone=tone,
+                )
+                + "\n"
+            )
+            if result.changed_files:
+                changed = ", ".join(result.changed_files)
+                self._write(self.theme.notice("Changed", changed) + "\n")
+            self._write("\n")
+            return
+        self._write(f"[SESSION] {result.status.value} | Run ID: {result.run_id}\n")
         if result.changed_files:
             self._write("[SESSION] Changed: " + ", ".join(result.changed_files) + "\n")
 
@@ -159,15 +232,24 @@ class InteractiveSession:
         if history.total_turns == 0:
             self._write("No tasks have run in this session.\n")
             return
+        if self.styled:
+            self._write(self.theme.paint("History", "strong") + "\n")
         if history.compacted_turns:
             self._write(
                 f"{history.compacted_turns} earlier turn(s) are in compacted memory.\n"
             )
         for entry in history.entries:
             request = " ".join(entry.request.split())
-            self._write(
-                f"{entry.index}. {entry.status.value} {entry.run_id} | {request}\n"
-            )
+            if self.styled:
+                status = self.theme.terminal_line(entry.status.value, "")
+                self._write(
+                    f"  {entry.index:>2}  {status}  "
+                    f"{self.theme.paint(entry.run_id[:8], 'muted')}  {request}\n"
+                )
+            else:
+                self._write(
+                    f"{entry.index}. {entry.status.value} {entry.run_id} | {request}\n"
+                )
 
     def _render_exit(self) -> None:
         reference = self.conversation.reference
@@ -177,12 +259,17 @@ class InteractiveSession:
             self._write(f"\nCould not clean up empty session: {exc}\n")
             discarded = False
         if discarded:
-            self._write("\nNo completed tasks; empty session was not saved.\n")
+            message = "No completed tasks; empty session was not saved."
+            if self.styled:
+                self._write("\n" + self.theme.notice("Session", message) + "\n")
+            else:
+                self._write("\n" + message + "\n")
             return
-        self._write(
-            "\nSession ended. Resume with: coding-agent resume "
-            f"{reference}\n"
-        )
+        message = f"Resume with: coding-agent resume {reference}"
+        if self.styled:
+            self._write("\n" + self.theme.notice("Session saved", message) + "\n")
+        else:
+            self._write("\nSession ended. " + message + "\n")
 
     def _resume_session(self, reference: str | None) -> None:
         try:
@@ -229,16 +316,19 @@ class InteractiveSession:
             None,
         )
         suffix = f" · {_session_description(info)}" if info is not None else ""
-        self._write(f"Resumed session {resumed.reference}{suffix}\n")
+        message = f"{resumed.reference}{suffix}"
+        if self.styled:
+            self._write(self.theme.notice("Resumed", message) + "\n")
+        else:
+            self._write(f"Resumed session {message}\n")
 
-    def _detect_styling(self) -> bool:
-        is_tty = getattr(self.output, "isatty", lambda: False)()
-        return bool(is_tty) and "NO_COLOR" not in os.environ
-
-    def _style(self, value: str, code: str) -> str:
-        if not self.styled:
-            return value
-        return f"\x1b[{code}m{value}\x1b[0m"
+    def _write_session_error(self, message: str) -> None:
+        if self.styled:
+            self._write(
+                self.theme.notice("Session error", message, tone="danger") + "\n"
+            )
+        else:
+            self._write(f"[SESSION] {message}\n")
 
     def _write(self, value: str, *, flush: bool = False) -> None:
         self.output.write(value)
@@ -246,22 +336,14 @@ class InteractiveSession:
             self.output.flush()
 
 
-def _status_color(status: RunStatus) -> str:
-    if status is RunStatus.SUCCEEDED:
-        return "32"
-    if status is RunStatus.ANSWERED:
-        return "36"
-    if status is RunStatus.BLOCKED:
-        return "33"
-    if status is RunStatus.CANCELLED:
-        return "36"
-    return "31"
-
-
 def _session_description(session: SessionInfo) -> str:
     timestamp = session.last_turn_at or session.created_at
     time_label = _local_time(timestamp)
-    request = _one_line(session.last_request) if session.last_request else "no completed request"
+    request = (
+        _one_line(session.last_request)
+        if session.last_request
+        else "no completed request"
+    )
     turn_label = "turn" if session.turn_count == 1 else "turns"
     return f"{time_label} · {session.turn_count} {turn_label} · last: {request}"
 
@@ -274,7 +356,9 @@ def _local_time(value: str) -> str:
 
 
 def _one_line(value: str, *, limit: int = 80) -> str:
-    printable = "".join(character if character.isprintable() else " " for character in value)
+    printable = "".join(
+        character if character.isprintable() else " " for character in value
+    )
     normalized = " ".join(printable.split()) or "[empty]"
     if len(normalized) <= limit:
         return normalized

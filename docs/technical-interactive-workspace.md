@@ -277,6 +277,14 @@ set. Plain text is the complete fallback, which keeps Windows and redirected
 tests deterministic. `/clear` emits ANSI clear-screen codes only in styled
 mode.
 
+`TerminalTheme` is the shared presentation seam for the welcome panel, prompt,
+menu, progress hierarchy, terminal statuses, and approval card. It contains no
+controller state and accepts only already-bounded display strings. The
+interactive session, console event sink, prompt selector, and approval adapter
+retain their existing behavioral interfaces and delegate only styling and
+layout to this module. Unknown action names are humanized deterministically;
+the structured JSONL log continues to retain the exact protocol name.
+
 `TerminalPrompt.readline(prompt) -> str` owns platform key decoding and the
 slash-command selector behind one interface. Windows uses `msvcrt.getwch` and
 recognizes both Windows extended keys and ConPTY escape sequences. POSIX uses a
@@ -288,13 +296,15 @@ call `readline` directly.
 The prompt maintains a Unicode-aware editable buffer with left/right,
 Home/End, Backspace, and Delete behavior. A leading `/` opens the static command
 catalog immediately. The menu redraws its fixed-height candidate area in place,
-using reverse video for the selected command. Enter closes the menu and copies
-the selection into the existing editable buffer; only a later Enter returns the
-line to `InteractiveSession`. Selection and prefix filtering stay internal to
-the module. Appends use terminal-native incremental echo instead of redrawing
-the entire buffer, which keeps long wrapped Chinese or pasted requests linear
-and prevents repeated prompt fragments. Cursor edits retain explicit redraw
-behavior. Tests inject semantic key events at the same `readline` interface.
+using a colored whole-row highlight for the selected command. With styling
+disabled, a visible `>` marker preserves selection state without color. Enter
+closes the menu and copies the selection into the existing editable buffer;
+only a later Enter returns the line to `InteractiveSession`. Selection and
+prefix filtering stay internal to the module. Appends use terminal-native
+incremental echo instead of redrawing the entire buffer, which keeps long
+wrapped Chinese or pasted requests linear and prevents repeated prompt
+fragments. Cursor edits retain explicit redraw behavior. Tests inject semantic
+key events at the same `readline` interface.
 
 `KeyboardInterrupt` while reading a prompt prints a cancellation hint and
 returns to the prompt. EOF exits cleanly. A `KeyboardInterrupt` escaping a run
@@ -312,7 +322,15 @@ full output. Control/format characters are escaped before reaching the console.
 `AgentEngine` adds only these bounded descriptions to `model_action` and
 `tool_finished` events. `ConsoleEventSink` renders them and omits empty
 rationale punctuation; JSONL and JSON-console event shapes remain additive and
-redacted.
+redacted. Styled output pairs each model decision with an indented tool outcome
+and maps protocol names such as `read_file` to short display labels such as
+`Read`; redirected output retains the stable bracketed plain-text form.
+For human console runs, `LocalAgentRunner` wraps the configured `ModelPort` in a
+presentation-only adapter. It asks `ConsoleEventSink` to show a flushed,
+temporary `Working…` line immediately before `complete(...)` and clears it in a
+`finally` block. The wrapper does not alter the request, response, controller
+state, or structured event protocol. Plain console and JSON modes bypass the
+visual indicator.
 
 Tool timing distinguishes controller/approval latency from execution. The
 console prints `execution_ms` and, when nonzero, `approval_wait_ms`; the total

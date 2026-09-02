@@ -21,6 +21,59 @@ from coding_agent.events import ConsoleEventSink, JsonlEventSink, Redactor
 
 
 class EventAndContextTests(unittest.TestCase):
+    def test_styled_console_replaces_working_indicator_with_model_action(self) -> None:
+        output = io.StringIO()
+        sink = ConsoleEventSink(output_stream=output, styled=True)
+
+        sink.begin_model_request()
+        sink.end_model_request()
+        sink.emit(
+            RunEvent(
+                run_id="run",
+                sequence=1,
+                kind="model_action",
+                timestamp="now",
+                data={"action": "read_file", "detail": "path=index.html"},
+            )
+        )
+
+        rendered = output.getvalue()
+        self.assertIn("Working…", rendered)
+        self.assertIn("\r\x1b[2K", rendered)
+        self.assertIn("● Read", _without_ansi(rendered))
+
+    def test_styled_console_uses_human_labels_and_visual_hierarchy(self) -> None:
+        output = io.StringIO()
+        sink = ConsoleEventSink(output_stream=output, styled=True)
+
+        sink.emit(
+            RunEvent(
+                run_id="run",
+                sequence=1,
+                kind="model_action",
+                timestamp="now",
+                data={"action": "read_file", "detail": "path=index.html"},
+            )
+        )
+        sink.emit(
+            RunEvent(
+                run_id="run",
+                sequence=2,
+                kind="tool_finished",
+                timestamp="now",
+                data={
+                    "tool": "read_file",
+                    "detail": "path=index.html · lines=1-20",
+                    "status": "COMPLETED",
+                    "duration_ms": 3,
+                },
+            )
+        )
+
+        rendered = _without_ansi(output.getvalue())
+        self.assertIn("● Read  path=index.html", rendered)
+        self.assertIn("└ ✓ Read  path=index.html · lines=1-20 · 3 ms", rendered)
+
     def test_console_progress_uses_structured_detail_without_empty_colons(self) -> None:
         output = io.StringIO()
         sink = ConsoleEventSink()
@@ -336,6 +389,12 @@ class EventAndContextTests(unittest.TestCase):
             )
 
         self.assertIn("exec 125 ms, approval 4000 ms", output.getvalue())
+
+
+def _without_ansi(value: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", value)
 
 
 if __name__ == "__main__":

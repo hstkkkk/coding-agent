@@ -8,6 +8,27 @@ from coding_agent.policy import PromptApprovalAdapter
 
 
 class PromptApprovalTests(unittest.TestCase):
+    def test_styled_prompt_renders_a_summary_first_approval_card(self) -> None:
+        output = io.StringIO()
+        adapter = PromptApprovalAdapter(
+            input_stream=io.StringIO("\n"),
+            output_stream=output,
+            styled=True,
+        )
+
+        decision = adapter.request(self._request("hidden-inline-code" * 100))
+
+        rendered = _without_ansi(output.getvalue())
+        self.assertFalse(decision.approved)
+        self.assertIn("╭─ Approval required · EXECUTION", rendered)
+        self.assertIn("│  Action", rendered)
+        self.assertIn("Run a local program", rendered)
+        self.assertIn("│  Request", rendered)
+        self.assertIn("program=node", rendered)
+        self.assertIn("│  Risk", rendered)
+        self.assertIn("│  Digest", rendered)
+        self.assertIn("╰─ y approve · d details · Enter deny", rendered)
+        self.assertIn("❯ Approve this digest?", rendered)
     def test_initial_prompt_is_short_and_offers_details(self) -> None:
         marker = "long-inline-code-marker" * 300
         output = io.StringIO()
@@ -73,6 +94,12 @@ class PromptApprovalTests(unittest.TestCase):
                 "purpose": "verify",
             },
         )
+
+
+def _without_ansi(value: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", value)
 
 
 if __name__ == "__main__":

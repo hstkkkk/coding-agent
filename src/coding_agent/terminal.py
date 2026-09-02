@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Iterator, TextIO
 
+from .terminal_ui import TerminalTheme
+
 
 class TerminalKey(Enum):
     ENTER = "enter"
@@ -43,6 +45,7 @@ class TerminalPrompt:
         input_stream: TextIO | None = None,
         output_stream: TextIO | None = None,
         interactive: bool | None = None,
+        styled: bool | None = None,
         key_reader: Callable[[], str | TerminalKey] | None = None,
     ) -> None:
         self.commands = commands
@@ -54,6 +57,10 @@ class TerminalPrompt:
             output_tty = bool(getattr(self.output, "isatty", lambda: False)())
             interactive = input_tty and output_tty
         self.interactive = interactive
+        self.theme = TerminalTheme.for_stream(
+            self.output,
+            enabled=styled,
+        )
 
     def readline(self, prompt: str) -> str:
         """Return one line, opening the command selector as soon as `/` is typed."""
@@ -302,21 +309,37 @@ class TerminalPrompt:
             search_descriptions=search_descriptions,
         )
         width = max((len(choice.command) for choice in choices), default=0)
-        rows = [
-            f"{title} (↑/↓ select, Enter {enter_action}, type to filter, "
-            "Esc cancel):"
-        ]
+        if self.theme.enabled:
+            rows = [self.theme.menu_header(title, enter_action)]
+        else:
+            rows = [
+                f"{title} (↑/↓ select, Enter {enter_action}, type to filter, "
+                "Esc cancel):"
+            ]
         if matches:
             for index, choice in enumerate(matches):
                 command = f"{choice.command:<{width}}"
                 if index == selected:
-                    command = f"\x1b[7m{command}\x1b[0m"
-                rows.append(f"  {command}  {choice.description}")
+                    if self.theme.enabled:
+                        rows.append(
+                            self.theme.selected_row(
+                                f"{command}  {choice.description}"
+                            )
+                        )
+                    else:
+                        rows.append(f"> {command}  {choice.description}")
+                else:
+                    rows.append(f"  {command}  {choice.description}")
         else:
             rows.append("  No matching command")
         while len(rows) < menu_lines - 1:
             rows.append("")
-        rows.append(f"Filter: {query_prefix}{query}")
+        filter_line = f"Filter: {query_prefix}{query}"
+        rows.append(
+            self.theme.paint(filter_line, "muted")
+            if self.theme.enabled
+            else filter_line
+        )
 
         if redraw:
             self._write(f"\x1b[{menu_lines}A")

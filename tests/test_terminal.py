@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import os
 import unittest
+from unittest.mock import patch
 
 from coding_agent.terminal import CommandChoice, TerminalKey, TerminalPrompt
 
@@ -16,6 +18,25 @@ COMMANDS = (
 
 
 class TerminalPromptTests(unittest.TestCase):
+    def test_styled_command_menu_highlights_the_whole_selected_row(self) -> None:
+        output = io.StringIO()
+        iterator = iter(["/", TerminalKey.DOWN, TerminalKey.ENTER, TerminalKey.ENTER])
+        prompt = TerminalPrompt(
+            commands=COMMANDS,
+            input_stream=io.StringIO(),
+            output_stream=output,
+            interactive=True,
+            styled=True,
+            key_reader=lambda: next(iterator),
+        )
+
+        self.assertEqual(prompt.readline("❯ "), "/workspace\n")
+
+        rendered = output.getvalue()
+        self.assertIn("\x1b[30;46m", rendered)
+        self.assertIn("› /workspace", _without_ansi(rendered))
+        self.assertIn("↑/↓ move", _without_ansi(rendered))
+
     def test_slash_opens_menu_and_arrows_select_a_command(self) -> None:
         output = io.StringIO()
         prompt = self._prompt(
@@ -36,7 +57,7 @@ class TerminalPromptTests(unittest.TestCase):
         self.assertIn("Commands", rendered)
         self.assertIn("/help", rendered)
         self.assertIn("/workspace", rendered)
-        self.assertIn("\x1b[7m/history", rendered)
+        self.assertIn("\x1b[30;46m› /history", rendered)
         self.assertNotIn("Selected:", rendered)
         self.assertIn("↑/↓", rendered)
 
@@ -71,7 +92,7 @@ class TerminalPromptTests(unittest.TestCase):
         result = prompt.select("Resume session", choices)
 
         self.assertEqual(result, "93df3b75")
-        self.assertIn("\x1b[7m93df3b75", output.getvalue())
+        self.assertIn("\x1b[30;46m› 93df3b75", output.getvalue())
         self.assertIn("Fix parser tests", output.getvalue())
 
     def test_typing_filters_the_menu_and_backspace_edits_filter(self) -> None:
@@ -157,6 +178,22 @@ class TerminalPromptTests(unittest.TestCase):
         self.assertEqual(prompt.readline("coding-agent> "), "/help\n")
         self.assertEqual(output.getvalue(), "coding-agent> ")
 
+    def test_no_color_keeps_a_visible_selection_marker(self) -> None:
+        output = _TTYStringIO()
+        iterator = iter(["/", TerminalKey.DOWN, TerminalKey.ENTER, TerminalKey.ENTER])
+        with patch.dict(os.environ, {"NO_COLOR": "1"}):
+            prompt = TerminalPrompt(
+                commands=COMMANDS,
+                input_stream=_TTYStringIO(),
+                output_stream=output,
+                interactive=True,
+                key_reader=lambda: next(iterator),
+            )
+
+        self.assertEqual(prompt.readline("coding-agent> "), "/workspace\n")
+        self.assertIn("> /workspace", output.getvalue())
+        self.assertNotIn("\x1b[30;46m", output.getvalue())
+
     @staticmethod
     def _prompt(keys: list[str | TerminalKey], output: io.StringIO) -> TerminalPrompt:
         iterator = iter(keys)
@@ -165,8 +202,20 @@ class TerminalPromptTests(unittest.TestCase):
             input_stream=io.StringIO(),
             output_stream=output,
             interactive=True,
+            styled=True,
             key_reader=lambda: next(iterator),
         )
+
+
+class _TTYStringIO(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def _without_ansi(value: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", value)
 
 
 if __name__ == "__main__":

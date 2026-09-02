@@ -67,6 +67,8 @@ accidentally carry old approvals or verification evidence into a new run.
   weakening verified completion for coding tasks.
 - Typing `/` exposes all session commands immediately, with arrow-key selection
   and type-to-filter behavior.
+- A compact, consistent visual hierarchy makes startup state, agent activity,
+  tool outcomes, approvals, and session results scannable at a glance.
 - Model/tool progress names the directory, file, command, or output being
   handled and reports a compact observable result.
 - Execution approval starts with a bounded risk summary and makes full
@@ -116,29 +118,32 @@ directory. If the directory is not a repository, it reports each completed
 setup action:
 
 ```text
-[SETUP] Initialized Git repository.
-[SETUP] Added protective and project-aware .gitignore rules.
-[SETUP] Created initial commit 1a2b3c4.
+  ↳ Setup  Initialized Git repository.
+  ↳ Setup  Added protective and project-aware .gitignore rules.
+  ↳ Setup  Created initial commit 1a2b3c4.
 ```
 
 It then opens the session:
 
 ```text
-Bounded Coding Agent
-Workspace: C:\work\calculator
-Model: deepseek-v4-flash
-Session: 7e02e19a9ec44ad5b1e52c5f49f3ed3a (new)
-Type / to browse commands, or /exit to quit.
+╭─ Bounded Coding Agent
+│  Workspace  C:\work\calculator
+│  Model      deepseek-v4-flash · thinking disabled
+│  Session    7e02e19a · new
+╰─ / commands · /exit quit
 
-coding-agent> Fix the failing parser tests
+❯ Fix the failing parser tests
 ```
 
 Model and tool events remain visible while the task runs. When the controller
 reaches a terminal state, the UI prints the status and run ID, then returns to
-the prompt.
+the prompt. The presentation remains line-oriented so normal terminal
+scrollback, copying, and audit workflows continue to work. While waiting for a
+model response, one temporary `◇ Working…` line makes latency visible; the next
+action or error replaces that line instead of adding permanent noise.
 
 For a request such as `Who are you?`, the model calls `respond` and the UI
-prints `[ANSWER] ...` followed by an `ANSWERED` session status. Repository
+prints a compact `◇ Answer` line followed by the run reference. Repository
 questions may use read-only tools first. If the current run has mutated the
 workspace, the controller rejects `respond` and still requires verified
 `finish` or an explicit blocked result.
@@ -149,12 +154,12 @@ Each model decision and tool result names its target instead of repeating only
 the tool name:
 
 ```text
-[MODEL] list_directory · path=.
-[TOOL] list_directory · path=. · 1 entry -> COMPLETED (2 ms)
-[MODEL] create_file · path=index.html · 12640 chars
-[TOOL] create_file · path=index.html · changed -> COMPLETED (18 ms)
-[MODEL] run_command · program=node · cwd=. · purpose=verify · 2 args · inline code=3012 chars
-[TOOL] run_command · program=node · exit=0 -> COMPLETED (412 ms)
+● List  path=.
+  └ ✓ List  path=. · 1 entry · 2 ms
+● Create  path=index.html · 12640 chars
+  └ ✓ Create  path=index.html · changed · 18 ms
+● Run  program=node · cwd=. · purpose=verify · 2 args · inline code=3012 chars
+  └ ✓ Run  program=node · exit=0 · 412 ms
 ```
 
 File contents, inline scripts, search terms, and output bodies are represented
@@ -164,10 +169,16 @@ identical actions show a repetition count.
 ### Layered approval
 
 An execution approval initially shows the action, bounded request summary,
-OS-account risk, and the digest of the exact operation. The choice prompt is:
+OS-account risk, and the digest of the exact operation:
 
 ```text
-Approve this exact digest? [y]es / [d]etails / [N]o:
+╭─ Approval required · EXECUTION
+│  Action   Run a local program
+│  Request  program=node · cwd=. · purpose=verify · 2 args
+│  Risk     Executes code with your operating-system account permissions.
+│  Digest   1a9382237be7
+╰─ y approve · d details · Enter deny
+❯ Approve this digest? [y]es · [d]etails · [N]o:
 ```
 
 `d` prints the complete redacted arguments as wrapped JSON and the full digest,

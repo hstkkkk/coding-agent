@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .domain import ApprovalDecision, ApprovalPort, ApprovalRequest, RiskLevel
+from .terminal_ui import TerminalTheme
 
 
 class PolicyViolation(ValueError):
@@ -109,25 +110,44 @@ class PromptApprovalAdapter(ApprovalPort):
         input_stream: TextIO | None = None,
         output_stream: TextIO | None = None,
         detail_width: int = 100,
+        styled: bool | None = None,
     ) -> None:
         self.input = input_stream or sys.stdin
         self.output = output_stream or sys.stdout
         self.detail_width = max(40, detail_width)
+        self.theme = TerminalTheme.for_stream(self.output, enabled=styled)
 
     def request(self, request: ApprovalRequest) -> ApprovalDecision:
-        self._write(
-            f"\nApproval required [{request.risk.value}]\n"
-            f"  Action: {_approval_action(request.tool_name)}\n"
-            f"  Request: {request.summary or request.tool_name}\n"
-            f"  Risk: {_risk_description(request.risk)}\n"
-            f"  Operation digest: {request.operation_digest[:12]}\n"
-        )
-        while True:
+        if self.theme.enabled:
             self._write(
-                "Approve this exact digest? "
-                "[y]es / [d]etails / [N]o: ",
-                flush=True,
+                "\n"
+                + self.theme.approval_card(
+                    risk=request.risk.value,
+                    action=_approval_action(request.tool_name),
+                    request=request.summary or request.tool_name,
+                    description=_risk_description(request.risk),
+                    digest=request.operation_digest[:12],
+                )
             )
+        else:
+            self._write(
+                f"\nApproval required [{request.risk.value}]\n"
+                f"  Action: {_approval_action(request.tool_name)}\n"
+                f"  Request: {request.summary or request.tool_name}\n"
+                f"  Risk: {_risk_description(request.risk)}\n"
+                f"  Operation digest: {request.operation_digest[:12]}\n"
+            )
+        while True:
+            prompt = (
+                self.theme.prompt()
+                + self.theme.paint(
+                    "Approve this digest? [y]es · [d]etails · [N]o: ",
+                    "muted",
+                )
+                if self.theme.enabled
+                else "Approve this exact digest? [y]es / [d]etails / [N]o: "
+            )
+            self._write(prompt, flush=True)
             answer = self.input.readline()
             if answer == "":
                 return ApprovalDecision(False, "no interactive input was available")
@@ -139,7 +159,14 @@ class PromptApprovalAdapter(ApprovalPort):
             if choice in {"d", "detail", "details"}:
                 self._render_details(request)
                 continue
-            self._write("Enter y to approve, d for details, or n to deny.\n")
+            message = "Enter y to approve, d for details, or n to deny."
+            if self.theme.enabled:
+                self._write(
+                    self.theme.notice("Invalid choice", message, tone="warning")
+                    + "\n"
+                )
+            else:
+                self._write(message + "\n")
 
     def _render_details(self, request: ApprovalRequest) -> None:
         encoded = json.dumps(
@@ -154,16 +181,32 @@ class PromptApprovalAdapter(ApprovalPort):
             else character
             for character in encoded
         )
-        self._write(
-            "\nFull arguments (redacted JSON; visual wrapping only):\n"
-        )
+        if self.theme.enabled:
+            self._write(
+                "\n"
+                + self.theme.paint("Full arguments", "strong")
+                + self.theme.paint(
+                    " · redacted JSON · visual wrapping only", "muted"
+                )
+                + "\n"
+            )
+        else:
+            self._write(
+                "\nFull arguments (redacted JSON; visual wrapping only):\n"
+            )
         for line in encoded.splitlines() or [""]:
             if not line:
                 self._write("\n")
                 continue
             for offset in range(0, len(line), self.detail_width):
                 self._write("  " + line[offset : offset + self.detail_width] + "\n")
-        self._write(f"Exact operation digest: {request.operation_digest}\n\n")
+        if self.theme.enabled:
+            self._write(
+                self.theme.paint("Exact digest", "muted")
+                + f"  {request.operation_digest}\n\n"
+            )
+        else:
+            self._write(f"Exact operation digest: {request.operation_digest}\n\n")
 
     def _write(self, value: str, *, flush: bool = False) -> None:
         self.output.write(value)

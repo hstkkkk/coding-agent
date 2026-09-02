@@ -42,6 +42,17 @@ crosses the same `LocalAgentRunner` interface.
 slash-command selector. It hides Windows/POSIX key decoding, Unicode display
 width, menu filtering, cursor movement, and the redirected line-mode fallback.
 
+`TerminalTheme` owns ANSI detection and the shared visual language for welcome
+panels, prompts, menus, progress, terminal states, and approval cards. It is a
+pure presentation seam: callers provide bounded text and retain all session,
+policy, and controller behavior. Redirected output and `NO_COLOR` bypass the
+styled presentation without changing event or approval semantics.
+
+For human console runs, a presentation-only `ModelPort` wrapper brackets each
+`complete(...)` call with `ConsoleEventSink.begin_model_request/end_model_request`.
+This produces one temporary working indicator without adding controller state
+or changing the structured event protocol.
+
 `describe_tool(...)` and `describe_tool_result(...)` project untrusted tool
 arguments/results into bounded, content-free progress details shared by events
 and approval summaries.

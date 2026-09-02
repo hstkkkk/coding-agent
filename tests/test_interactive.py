@@ -110,6 +110,29 @@ class InteractiveSessionTests(unittest.TestCase):
             (self.store.root / conversation.session_id / "session.jsonl").exists()
         )
 
+    def test_styled_session_uses_a_compact_welcome_panel_and_prompt(self) -> None:
+        output = io.StringIO()
+        session = InteractiveSession(
+            conversation=self.store.create(self.workspace),
+            model_label="test-model",
+            thinking_label="disabled",
+            input_stream=io.StringIO("polish the UI\n/exit\n"),
+            output_stream=output,
+            styled=True,
+        )
+
+        self.assertEqual(session.run(lambda _: self._result(1)), 0)
+
+        rendered = _without_ansi(output.getvalue())
+        self.assertIn("╭─ Bounded Coding Agent", rendered)
+        self.assertIn("│  Workspace", rendered)
+        self.assertIn("│  Model", rendered)
+        self.assertIn("test-model · thinking disabled", rendered)
+        self.assertIn("│  Session", rendered)
+        self.assertIn("╰─ / commands · /exit quit", rendered)
+        self.assertIn("❯ ", rendered)
+        self.assertIn("↳ Run", rendered)
+
     def test_keyboard_interrupt_at_prompt_keeps_session_open(self) -> None:
         output = io.StringIO()
         source = _InterruptOnce("/exit\n")
@@ -224,6 +247,12 @@ class _InterruptOnce(io.StringIO):
             self._interrupted = True
             raise KeyboardInterrupt
         return super().readline(*args, **kwargs)
+
+
+def _without_ansi(value: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", value)
 
 
 if __name__ == "__main__":

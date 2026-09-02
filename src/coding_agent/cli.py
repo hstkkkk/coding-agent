@@ -30,6 +30,7 @@ from .settings import (
     UserSettings,
     load_user_settings,
 )
+from .terminal_ui import TerminalTheme
 from .workspace import WorkspaceSetupError, WorkspaceSetupResult, prepare_workspace
 
 
@@ -426,6 +427,7 @@ def _render_workspace_setup(
     *,
     json_output: bool,
 ) -> None:
+    theme = TerminalTheme.for_stream(sys.stdout)
     for message in result.messages:
         if json_output:
             print(
@@ -436,7 +438,10 @@ def _render_workspace_setup(
                 )
             )
         else:
-            print(f"[SETUP] {message}")
+            if theme.enabled:
+                print(theme.notice("Setup", message))
+            else:
+                print(f"[SETUP] {message}")
 
 
 def _inspect_run(args: argparse.Namespace) -> int:

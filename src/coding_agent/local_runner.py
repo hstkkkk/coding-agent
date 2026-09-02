@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Mapping
 
 from .artifacts import ArtifactStore
-from .domain import ModelPort, RunOptions, RunResult, TaskRequest
+from .domain import (
+    AssistantTurn,
+    ModelPort,
+    ModelRequest,
+    RunOptions,
+    RunResult,
+    TaskRequest,
+)
 from .engine import AgentEngine
 from .events import (
     CompositeEventSink,
@@ -79,8 +86,11 @@ class LocalAgentRunner:
             redactor=self.redactor,
             default_command_timeout=self.settings.options.default_command_timeout,
         )
+        presented_model: ModelPort = self.model
+        if isinstance(display_sink, ConsoleEventSink):
+            presented_model = _PresentedModel(self.model, display_sink)
         engine = AgentEngine(
-            model=self.model,
+            model=presented_model,
             tools=tools,
             events=events,
             options=self.settings.options,
@@ -93,3 +103,18 @@ class LocalAgentRunner:
                 run_id=run_id,
             )
         )
+
+
+class _PresentedModel(ModelPort):
+    """Add transient terminal activity without entering controller state."""
+
+    def __init__(self, delegate: ModelPort, console: ConsoleEventSink) -> None:
+        self._delegate = delegate
+        self._console = console
+
+    def complete(self, request: ModelRequest) -> AssistantTurn:
+        self._console.begin_model_request()
+        try:
+            return self._delegate.complete(request)
+        finally:
+            self._console.end_model_request()

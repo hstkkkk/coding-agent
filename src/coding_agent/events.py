@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 import unicodedata
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, TextIO
 
 from .domain import EventSink, RunEvent, replace_unpaired_surrogates
+from .terminal_ui import TerminalTheme
 
 
 class Redactor:
@@ -88,10 +90,23 @@ class InMemoryEventSink(EventSink):
 class ConsoleEventSink(EventSink):
     """Render only concise, non-sensitive progress information."""
 
-    def __init__(self, redactor: Redactor | None = None) -> None:
+    def __init__(
+        self,
+        redactor: Redactor | None = None,
+        *,
+        output_stream: TextIO | None = None,
+        styled: bool | None = None,
+    ) -> None:
         self._redactor = redactor or Redactor()
+        self._output = output_stream
+        self._theme = TerminalTheme.for_stream(
+            output_stream or sys.stdout,
+            enabled=styled,
+        )
+        self._pending_line = False
 
     def emit(self, event: RunEvent) -> None:
+        self._clear_pending_line()
         sanitized = self._redactor.value(event.data)
         assert isinstance(sanitized, dict)
         data = sanitized
@@ -103,77 +118,182 @@ class ConsoleEventSink(EventSink):
             repeated = data.get("repeated")
             if isinstance(repeated, int) and repeated > 1:
                 parts.append(f"repeated {repeated}x")
-            line = "[MODEL] " + " · ".join(part for part in parts if part)
             rationale = _console_text(data.get("rationale", ""), limit=180)
-            if rationale:
-                line += f" — {rationale}"
-            print(line)
+            if self._theme.enabled:
+                repeated_value = repeated if isinstance(repeated, int) else None
+                self._write(
+                    self._theme.action_line(
+                        _console_text(data.get("action", "unknown")),
+                        _console_text(data.get("detail", "")),
+                        rationale,
+                        repeated_value,
+                    )
+                )
+            else:
+                line = "[MODEL] " + " · ".join(part for part in parts if part)
+                if rationale:
+                    line += f" — {rationale}"
+                self._write(line)
         elif event.kind == "tool_finished":
             detail = _console_text(data.get("detail", ""))
             detail_fragment = f" · {detail}" if detail else ""
             approval_wait = data.get("approval_wait_ms", 0)
             execution = data.get("execution_ms", data.get("duration_ms", 0))
-            if "execution_ms" in data or (isinstance(approval_wait, int) and approval_wait > 0):
+            if "execution_ms" in data or (
+                isinstance(approval_wait, int) and approval_wait > 0
+            ):
                 timing = f"exec {execution} ms"
                 if isinstance(approval_wait, int) and approval_wait > 0:
                     timing += f", approval {approval_wait} ms"
             else:
                 timing = f"{data.get('duration_ms', 0)} ms"
-            print(
-                f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{detail_fragment} -> "
-                f"{_console_text(data.get('status', 'UNKNOWN'))} "
-                f"({timing})"
-            )
+            tool = _console_text(data.get("tool", "unknown"))
+            status = _console_text(data.get("status", "UNKNOWN"))
+            if self._theme.enabled:
+                self._write(
+                    self._theme.tool_result_line(tool, detail, status, timing)
+                )
+            else:
+                self._write(
+                    f"[TOOL] {tool}{detail_fragment} -> {status} ({timing})"
+                )
             recovery_id = data.get("recovery_output_id")
             if isinstance(recovery_id, str) and recovery_id:
                 recovery_path = _console_text(data.get("recovery_path", "file"))
-                print(
-                    f"[RECOVERY] Before-image for {recovery_path} saved. Restore to "
+                message = (
+                    f"Before-image for {recovery_path} saved. Restore to "
                     "a new file with: coding-agent recover-file "
                     f"{event.run_id} {recovery_id} --output <path>"
                 )
+                if self._theme.enabled:
+                    self._write(self._theme.notice("Recovery", message))
+                else:
+                    self._write(f"[RECOVERY] {message}")
             screenshot_id = data.get("screenshot_id")
             if isinstance(screenshot_id, str) and screenshot_id:
-                print(
-                    "[BROWSER] Screenshot saved. Export it with: "
+                message = (
+                    "Screenshot saved. Export it with: "
                     "coding-agent export-screenshot "
                     f"{event.run_id} {screenshot_id} --output preview.png"
                 )
+                if self._theme.enabled:
+                    self._write(self._theme.notice("Browser", message))
+                else:
+                    self._write(f"[BROWSER] {message}")
         elif event.kind == "verification_rejected":
-            print(f"[VERIFY] rejected: {data.get('reason', '')}")
+            message = f"rejected: {_console_text(data.get('reason', ''), limit=600)}"
+            self._notice_or_plain("Verify", message, "[VERIFY]", tone="warning")
         elif event.kind == "answer_rejected":
-            print(f"[ANSWER] rejected: {_console_text(data.get('reason', ''))}")
+            message = f"rejected: {_console_text(data.get('reason', ''))}"
+            self._notice_or_plain("Answer", message, "[ANSWER]", tone="warning")
         elif event.kind == "tool_skipped":
             detail = _console_text(data.get("detail", ""))
             suffix = f" · {detail}" if detail else ""
-            print(
-                f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{suffix} -> "
-                f"SKIPPED · {_console_text(data.get('reason', ''))}"
-            )
+            tool = _console_text(data.get("tool", "unknown"))
+            reason = _console_text(data.get("reason", ""))
+            if self._theme.enabled:
+                self._write(
+                    self._theme.cached_tool_line(tool, detail, "SKIPPED", reason)
+                )
+            else:
+                self._write(f"[TOOL] {tool}{suffix} -> SKIPPED · {reason}")
         elif event.kind == "tool_cached":
             detail = _console_text(data.get("detail", ""))
             suffix = f" · {detail}" if detail else ""
-            print(
-                f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{suffix} -> "
-                f"CACHED · {_console_text(data.get('reason', ''))}"
-            )
-        elif event.kind == "finalization_started":
-            print(f"[FINALIZE] {_console_text(data.get('message', ''), limit=600)}")
-        elif event.kind == "progress_required":
-            print(f"[FOCUS] {_console_text(data.get('message', ''), limit=600)}")
-        elif event.kind == "wrap_up_started":
-            print(f"[WRAP-UP] {_console_text(data.get('message', ''), limit=600)}")
-        elif event.kind == "terminal":
-            if data.get("status") == "ANSWERED":
-                print(f"[ANSWER] {_console_text(data.get('summary', ''), limit=4_000)}")
+            tool = _console_text(data.get("tool", "unknown"))
+            reason = _console_text(data.get("reason", ""))
+            if self._theme.enabled:
+                self._write(
+                    self._theme.cached_tool_line(tool, detail, "CACHED", reason)
+                )
             else:
-                print(f"[DONE] {data.get('status', 'UNKNOWN')}: {data.get('summary', '')}")
+                self._write(f"[TOOL] {tool}{suffix} -> CACHED · {reason}")
+        elif event.kind == "finalization_started":
+            self._notice_or_plain(
+                "Finalize",
+                _console_text(data.get("message", ""), limit=600),
+                "[FINALIZE]",
+            )
+        elif event.kind == "progress_required":
+            self._notice_or_plain(
+                "Focus",
+                _console_text(data.get("message", ""), limit=600),
+                "[FOCUS]",
+                tone="warning",
+            )
+        elif event.kind == "wrap_up_started":
+            self._notice_or_plain(
+                "Wrap up",
+                _console_text(data.get("message", ""), limit=600),
+                "[WRAP-UP]",
+                tone="warning",
+            )
+        elif event.kind == "terminal":
+            status = _console_text(data.get("status", "UNKNOWN"))
+            summary = _console_text(data.get("summary", ""), limit=4_000)
+            if self._theme.enabled:
+                self._write(self._theme.terminal_line(status, summary))
+            elif status == "ANSWERED":
+                self._write(f"[ANSWER] {summary}")
+            else:
+                self._write(f"[DONE] {status}: {summary}")
             warnings = data.get("warnings")
             if isinstance(warnings, list):
                 for warning in warnings:
-                    print(f"[WARNING] {_console_text(warning, limit=600)}")
+                    self._notice_or_plain(
+                        "Warning",
+                        _console_text(warning, limit=600),
+                        "[WARNING]",
+                        tone="warning",
+                    )
         elif event.kind in {"retry", "warning"}:
-            print(f"[{event.kind.upper()}] {_console_text(data.get('message', ''), limit=600)}")
+            label = "Retry" if event.kind == "retry" else "Warning"
+            self._notice_or_plain(
+                label,
+                _console_text(data.get("message", ""), limit=600),
+                f"[{event.kind.upper()}]",
+                tone="warning",
+            )
+
+    def _notice_or_plain(
+        self,
+        label: str,
+        message: str,
+        plain_label: str,
+        *,
+        tone: str = "info",
+    ) -> None:
+        if self._theme.enabled:
+            self._write(self._theme.notice(label, message, tone=tone))
+        else:
+            self._write(f"{plain_label} {message}")
+
+    def begin_model_request(self) -> None:
+        """Show one temporary wait line without changing the event protocol."""
+
+        if not self._theme.enabled:
+            return
+        self._clear_pending_line()
+        self._write(self._theme.working_line(), end="", flush=True)
+        self._pending_line = True
+
+    def end_model_request(self) -> None:
+        self._clear_pending_line()
+
+    def _clear_pending_line(self) -> None:
+        if not self._pending_line:
+            return
+        self._write("\r\x1b[2K", end="", flush=True)
+        self._pending_line = False
+
+    def _write(
+        self,
+        value: str,
+        *,
+        end: str = "\n",
+        flush: bool = False,
+    ) -> None:
+        print(value, end=end, file=self._output, flush=flush)
 
 
 class JsonConsoleEventSink(EventSink):
