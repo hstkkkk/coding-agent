@@ -184,9 +184,16 @@ Progress lines identify the object being handled and the observable result:
 
 ```text
 [MODEL] read_file · path=index.html
-[TOOL] read_file · path=index.html · lines=1-240 · 9821 chars -> COMPLETED (2 ms)
+[TOOL] read_file · path=index.html · lines=1-240 · 9821 chars -> COMPLETED (exec 2 ms)
 [MODEL] run_command · program=node · cwd=. · purpose=verify · 2 args · inline code=2140 chars
 ```
+
+For approved operations, progress reports actual execution separately from the
+time spent waiting for the human, for example `(exec 125 ms, approval 4000
+ms)`. An identical consecutive read-only request is served by the existing
+observation once, then stopped with the dedicated `STAGNATION` error if the
+model ignores the corrective feedback. Exact protocol-rejection reasons are
+shown in bounded, redacted warnings rather than a generic failure line.
 
 Use the explicit subcommand when passing startup options:
 

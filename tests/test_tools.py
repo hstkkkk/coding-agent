@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from coding_agent.artifacts import ArtifactStore
-from coding_agent.domain import ErrorCode, ToolCall, ToolStatus
+from coding_agent.domain import ApprovalDecision, ErrorCode, ToolCall, ToolStatus
 from coding_agent.events import Redactor
 from coding_agent.policy import FixedApprovalAdapter
 from coding_agent.tools import LocalToolRuntime
@@ -189,6 +189,49 @@ class LocalToolRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result.status, ToolStatus.REJECTED)
         self.assertEqual(result.error_code, ErrorCode.APPROVAL_DENIED)
+
+    def test_tool_timing_separates_approval_wait_from_execution(self) -> None:
+        now = [0.0]
+
+        class TimedApproval:
+            def request(inner_self, request):
+                now[0] += 4.0
+                return ApprovalDecision(True)
+
+        runtime = LocalToolRuntime(
+            workspace=self.workspace,
+            approvals=TimedApproval(),
+            artifacts=self.artifacts,
+            redactor=self.redactor,
+            clock=lambda: now[0],
+        )
+        original_handler = runtime._handlers["write_file"]
+
+        def timed_handler(**arguments):
+            now[0] += 0.125
+            return original_handler(**arguments)
+
+        runtime._handlers["write_file"] = timed_handler
+        read = runtime.execute(
+            ToolCall("read", "read_file", {"path": "sample.txt"}),
+            "read-action",
+        )
+        result = runtime.execute(
+            ToolCall(
+                "write",
+                "write_file",
+                {
+                    "path": "sample.txt",
+                    "content": "replacement\n",
+                    "expected_sha256": read.data["sha256"],
+                },
+            ),
+            "write-action",
+        )
+
+        self.assertEqual(result.approval_wait_ms, 4_000)
+        self.assertEqual(result.execution_ms, 125)
+        self.assertEqual(result.duration_ms, 4_125)
 
     def test_approval_request_is_concise_and_its_arguments_are_redacted(self) -> None:
         inline_code = "unit-test-secret-value" + ("x" * 2_000)

@@ -249,7 +249,7 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.BLOCKED)
 
     def test_repeated_protocol_errors_fail(self) -> None:
-        result, _, _, _ = self.run_engine(
+        result, _, _, events = self.run_engine(
             [
                 ModelProtocolError("bad one"),
                 ModelProtocolError("bad two"),
@@ -259,6 +259,8 @@ class AgentEngineTests(unittest.TestCase):
         )
         self.assertEqual(result.status, RunStatus.FAILED)
         self.assertEqual(result.error_code, ErrorCode.MODEL_PROTOCOL)
+        warnings = [event.data.get("message", "") for event in events.events if event.kind == "warning"]
+        self.assertTrue(any("bad one" in message for message in warnings))
 
     def test_transient_model_error_retries_with_fake_clock(self) -> None:
         clock = FakeClock()
@@ -285,10 +287,13 @@ class AgentEngineTests(unittest.TestCase):
 
     def test_identical_action_stagnation_stops_before_third_execution(self) -> None:
         same = AssistantTurn("inspect", ToolCall("same", "git_diff", {}))
-        result, _, tools, _ = self.run_engine([same, same, same])
+        result, model, tools, events = self.run_engine([same, same, same])
 
         self.assertEqual(result.status, RunStatus.FAILED)
-        self.assertEqual(tools.calls, ["git_diff", "git_diff"])
+        self.assertEqual(result.error_code, ErrorCode.STAGNATION)
+        self.assertEqual(tools.calls, ["git_diff"])
+        self.assertIn("unchanged", model.requests[2].user_prompt)
+        self.assertTrue(any(event.kind == "tool_skipped" for event in events.events))
 
 
 if __name__ == "__main__":

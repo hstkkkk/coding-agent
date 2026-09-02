@@ -46,12 +46,14 @@ class LocalToolRuntime(ToolRuntime):
         artifacts: ArtifactStore,
         redactor: Redactor,
         default_command_timeout: int = 120,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.path_policy = PathPolicy(workspace)
         self.approvals = approvals
         self.artifacts = artifacts
         self.redactor = redactor
         self.default_command_timeout = default_command_timeout
+        self._clock = clock
         self.files = FileTools(self.path_policy)
         self.git = GitInspector(self.path_policy.workspace)
         self.processes = ProcessRunner()
@@ -88,7 +90,9 @@ class LocalToolRuntime(ToolRuntime):
         }
 
     def execute(self, call: ToolCall, action_id: str) -> ToolResult:
-        started = time.monotonic()
+        started = self._clock()
+        approval_wait_ms = 0
+        execution_started: float | None = None
         definition = self._definition_by_name.get(call.name)
         if definition is None:
             return self._result(
@@ -108,6 +112,7 @@ class LocalToolRuntime(ToolRuntime):
                 summary = self.redactor.text(self._approval_summary(call))
                 safe_arguments = self.redactor.value(dict(call.arguments))
                 assert isinstance(safe_arguments, dict)
+                approval_started = self._clock()
                 decision = self.approvals.request(
                     request=ApprovalRequest(
                         action_id,
@@ -118,6 +123,7 @@ class LocalToolRuntime(ToolRuntime):
                         safe_arguments,
                     )
                 )
+                approval_wait_ms = int((self._clock() - approval_started) * 1000)
                 if not decision.approved:
                     return self._result(
                         action_id,
@@ -126,8 +132,10 @@ class LocalToolRuntime(ToolRuntime):
                         decision.reason or "operation was not approved",
                         ErrorCode.APPROVAL_DENIED,
                         started,
+                        approval_wait_ms=approval_wait_ms,
                     )
 
+            execution_started = self._clock()
             recovery = self._capture_recovery(call)
             data = self._handlers[call.name](**call.arguments)
             if recovery is not None:
@@ -142,6 +150,7 @@ class LocalToolRuntime(ToolRuntime):
             message = str(data.pop("_message", "tool completed"))
             sanitized = self.redactor.value(data)
             assert isinstance(sanitized, dict)
+            finished = self._clock()
             return ToolResult(
                 action_id=action_id,
                 tool_name=call.name,
@@ -149,7 +158,9 @@ class LocalToolRuntime(ToolRuntime):
                 message=message,
                 data=sanitized,
                 error_code=error_code,
-                duration_ms=int((time.monotonic() - started) * 1000),
+                duration_ms=int((finished - started) * 1000),
+                approval_wait_ms=approval_wait_ms,
+                execution_ms=int((finished - execution_started) * 1000),
                 truncated=truncated,
             )
 
@@ -161,6 +172,8 @@ class LocalToolRuntime(ToolRuntime):
                 str(exc),
                 ErrorCode.POLICY_DENIED,
                 started,
+                approval_wait_ms=approval_wait_ms,
+                execution_started=execution_started,
             )
         except EditConflict as exc:
             return self._result(
@@ -170,6 +183,8 @@ class LocalToolRuntime(ToolRuntime):
                 str(exc),
                 ErrorCode.TOOL_CONFLICT,
                 started,
+                approval_wait_ms=approval_wait_ms,
+                execution_started=execution_started,
             )
         except (ToolInputError, ValueError, TypeError) as exc:
             return self._result(
@@ -179,6 +194,8 @@ class LocalToolRuntime(ToolRuntime):
                 str(exc),
                 ErrorCode.TOOL_INPUT,
                 started,
+                approval_wait_ms=approval_wait_ms,
+                execution_started=execution_started,
             )
         except KeyboardInterrupt:
             return self._result(
@@ -188,6 +205,8 @@ class LocalToolRuntime(ToolRuntime):
                 "operation was cancelled",
                 ErrorCode.CANCELLED,
                 started,
+                approval_wait_ms=approval_wait_ms,
+                execution_started=execution_started,
             )
         except Exception as exc:  # defensive normalization at the tool seam
             return self._result(
@@ -197,6 +216,8 @@ class LocalToolRuntime(ToolRuntime):
                 f"{type(exc).__name__}: {exc}",
                 ErrorCode.TOOL_INTERNAL,
                 started,
+                approval_wait_ms=approval_wait_ms,
+                execution_started=execution_started,
             )
 
     def _capture_recovery(self, call: ToolCall) -> str | None:
@@ -254,22 +275,32 @@ class LocalToolRuntime(ToolRuntime):
             return "untracked" if line.startswith("?? ") else "modified"
         return None
 
-    @staticmethod
     def _result(
+        self,
         action_id: str,
         tool_name: str,
         status: ToolStatus,
         message: str,
         error_code: ErrorCode,
         started: float,
+        *,
+        approval_wait_ms: int = 0,
+        execution_started: float | None = None,
     ) -> ToolResult:
+        finished = self._clock()
         return ToolResult(
             action_id=action_id,
             tool_name=tool_name,
             status=status,
             message=message,
             error_code=error_code,
-            duration_ms=int((time.monotonic() - started) * 1000),
+            duration_ms=int((finished - started) * 1000),
+            approval_wait_ms=approval_wait_ms,
+            execution_ms=(
+                int((finished - execution_started) * 1000)
+                if execution_started is not None
+                else 0
+            ),
         )
 
     def _run_command(

@@ -111,10 +111,18 @@ class ConsoleEventSink(EventSink):
         elif event.kind == "tool_finished":
             detail = _console_text(data.get("detail", ""))
             detail_fragment = f" · {detail}" if detail else ""
+            approval_wait = data.get("approval_wait_ms", 0)
+            execution = data.get("execution_ms", data.get("duration_ms", 0))
+            if "execution_ms" in data or (isinstance(approval_wait, int) and approval_wait > 0):
+                timing = f"exec {execution} ms"
+                if isinstance(approval_wait, int) and approval_wait > 0:
+                    timing += f", approval {approval_wait} ms"
+            else:
+                timing = f"{data.get('duration_ms', 0)} ms"
             print(
                 f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{detail_fragment} -> "
                 f"{_console_text(data.get('status', 'UNKNOWN'))} "
-                f"({data.get('duration_ms', 0)} ms)"
+                f"({timing})"
             )
             recovery_id = data.get("recovery_output_id")
             if isinstance(recovery_id, str) and recovery_id:
@@ -128,13 +136,20 @@ class ConsoleEventSink(EventSink):
             print(f"[VERIFY] rejected: {data.get('reason', '')}")
         elif event.kind == "answer_rejected":
             print(f"[ANSWER] rejected: {_console_text(data.get('reason', ''))}")
+        elif event.kind == "tool_skipped":
+            detail = _console_text(data.get("detail", ""))
+            suffix = f" · {detail}" if detail else ""
+            print(
+                f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{suffix} -> "
+                f"SKIPPED · {_console_text(data.get('reason', ''))}"
+            )
         elif event.kind == "terminal":
             if data.get("status") == "ANSWERED":
                 print(f"[ANSWER] {_console_text(data.get('summary', ''), limit=4_000)}")
             else:
                 print(f"[DONE] {data.get('status', 'UNKNOWN')}: {data.get('summary', '')}")
         elif event.kind in {"retry", "warning"}:
-            print(f"[{event.kind.upper()}] {data.get('message', '')}")
+            print(f"[{event.kind.upper()}] {_console_text(data.get('message', ''), limit=600)}")
 
 
 class JsonConsoleEventSink(EventSink):

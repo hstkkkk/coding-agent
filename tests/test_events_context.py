@@ -9,7 +9,14 @@ from pathlib import Path
 
 from coding_agent.artifacts import ArtifactStore
 from coding_agent.context import ContextManager
-from coding_agent.domain import RunEvent, RunOptions, RunState
+from coding_agent.domain import (
+    RiskLevel,
+    RunEvent,
+    RunOptions,
+    RunState,
+    StepRecord,
+    ToolDefinition,
+)
 from coding_agent.events import ConsoleEventSink, JsonlEventSink, Redactor
 
 
@@ -172,6 +179,58 @@ class EventAndContextTests(unittest.TestCase):
             self.assertIn("controller", request.system_prompt.lower())
             normalized_prompt = " ".join(request.system_prompt.split())
             self.assertIn("call respond immediately", normalized_prompt)
+
+    def test_context_keeps_only_one_copy_of_an_identical_read_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = RunState("run", "inspect parser", Path(directory))
+            first_result = {
+                "action_id": "first",
+                "tool": "read_file",
+                "status": "COMPLETED",
+                "duration_ms": 3,
+                "data": {
+                    "path": "parser.py",
+                    "sha256": "a" * 64,
+                    "content": "UNIQUE_READ_BODY",
+                },
+            }
+            second_result = dict(first_result)
+            second_result["action_id"] = "second"
+            second_result["duration_ms"] = 7
+            state.steps.extend(
+                [
+                    StepRecord(1, 0, "read", "read_file", {"path": "parser.py"}, first_result),
+                    StepRecord(2, 0, "reread", "read_file", {"path": "parser.py"}, second_result),
+                ]
+            )
+            tool = ToolDefinition("read_file", "read", {}, RiskLevel.READ_ONLY)
+
+            request = ContextManager(RunOptions(max_context_chars=8_000)).build(state, (tool,))
+
+            self.assertEqual(request.user_prompt.count("UNIQUE_READ_BODY"), 1)
+            normalized_prompt = " ".join(request.system_prompt.split())
+            self.assertIn("Do not repeat an unchanged read-only action", normalized_prompt)
+
+    def test_console_separates_approval_wait_from_execution_time(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            ConsoleEventSink().emit(
+                RunEvent(
+                    run_id="run",
+                    sequence=1,
+                    kind="tool_finished",
+                    timestamp="now",
+                    data={
+                        "tool": "run_command",
+                        "status": "COMPLETED",
+                        "duration_ms": 4_125,
+                        "approval_wait_ms": 4_000,
+                        "execution_ms": 125,
+                    },
+                )
+            )
+
+        self.assertIn("exec 125 ms, approval 4000 ms", output.getvalue())
 
 
 if __name__ == "__main__":

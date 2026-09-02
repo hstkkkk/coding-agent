@@ -158,7 +158,8 @@ derived view containing:
 - the original objective and invariant rules;
 - workspace version and changed paths;
 - recent verification records and errors;
-- recent tool actions and normalized observations;
+- recent tool actions and normalized observations, with byte-identical
+  read-only observations deduplicated for the same workspace version;
 - the current tool schemas.
 
 Old events remain on disk when they fall out of the model view. Repository
@@ -207,9 +208,14 @@ receive structured feedback up to a small limit. File conflicts, command
 failures, timeouts, approval denials, and policy denials become observations;
 non-idempotent local actions are never retried automatically.
 
-Three identical consecutive actions trigger stagnation. Model turns, wall time,
-command time, output volume, and protocol mistakes all have controller-owned
-limits.
+The second identical consecutive read-only action is skipped and becomes a
+structured corrective observation; a third identical action triggers the
+dedicated `STAGNATION` terminal error. The fingerprint includes workspace
+version, so a later mutation invalidates an earlier read. Model turns, wall
+time, command time, output volume, and protocol mistakes all have
+controller-owned limits. Tool events record total time, approval-wait time, and
+actual execution time separately. Protocol warnings retain the bounded exact
+rejection reason and pass through the normal redaction boundary.
 
 ## Evaluation
 

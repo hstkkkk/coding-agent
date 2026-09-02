@@ -31,6 +31,12 @@ Call finish only after the current workspace version has successful, relevant
 verification evidence and you have inspected the resulting changes. Call
 report_blocked when an external requirement prevents safe progress. Never claim
 that an unverified coding task succeeded.
+
+Do not repeat an unchanged read-only action: its prior observation is already
+available and the controller may skip or reject the duplicate. Re-read only
+after a workspace change or with a meaningfully different path, range, or
+query. Preserve working files and prefer hash-guarded edit_file or write_file;
+do not delete and recreate a file merely to replace its contents.
 """
 
 
@@ -44,7 +50,8 @@ class ContextManager:
         tools: tuple[ToolDefinition, ...],
     ) -> ModelRequest:
         summary = self._state_summary(state)
-        step_blocks = [self._step_block(step) for step in state.steps]
+        visible_steps = self._deduplicate_readonly_steps(state.steps, tools)
+        step_blocks = [self._step_block(step) for step in visible_steps]
         selected: list[str] = []
         fixed = self._fixed_prompt(state.objective, summary)
         remaining = max(0, self.options.max_context_chars - len(fixed))
@@ -70,6 +77,53 @@ class ContextManager:
             user_prompt=prompt,
             tools=tools,
         )
+
+    @staticmethod
+    def _deduplicate_readonly_steps(
+        steps: list[object],
+        tools: tuple[ToolDefinition, ...],
+    ) -> list[object]:
+        read_only = {item.name for item in tools if item.risk.value == "READ_ONLY"}
+        selected: list[object] = []
+        seen: set[str] = set()
+        for step in reversed(steps):
+            result = getattr(step, "result")
+            action = getattr(step, "action_name")
+            is_tool_observation = isinstance(result, dict) and result.get("tool") == action
+            if action in read_only and is_tool_observation:
+                stable_result = {
+                    key: value
+                    for key, value in result.items()
+                    if key
+                    not in {
+                        "action_id",
+                        "duration_ms",
+                        "approval_wait_ms",
+                        "execution_ms",
+                    }
+                }
+                data = stable_result.get("data")
+                if isinstance(data, dict):
+                    stable_result["data"] = {
+                        key: value for key, value in data.items() if key != "output_id"
+                    }
+                key = json.dumps(
+                    {
+                        "workspace_version": getattr(step, "workspace_version"),
+                        "action": action,
+                        "arguments": getattr(step, "arguments"),
+                        "result": stable_result,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+            selected.append(step)
+        selected.reverse()
+        return selected
 
     @staticmethod
     def _fixed_prompt(objective: str, summary: str) -> str:

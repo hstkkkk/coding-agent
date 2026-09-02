@@ -58,6 +58,7 @@ class ErrorCode(str, Enum):
     COMMAND_FAILED = "COMMAND_FAILED"
     VERIFICATION_FAILED = "VERIFICATION_FAILED"
     STALE_VERIFICATION = "STALE_VERIFICATION"
+    STAGNATION = "STAGNATION"
     BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
     CANCELLED = "CANCELLED"
 
@@ -117,6 +118,8 @@ class ToolResult:
     data: JsonObject = field(default_factory=dict)
     error_code: ErrorCode | None = None
     duration_ms: int = 0
+    approval_wait_ms: int = 0
+    execution_ms: int = 0
     truncated: bool = False
 
     def for_model(self) -> JsonObject:
@@ -128,6 +131,8 @@ class ToolResult:
             "data": self.data,
             "error_code": self.error_code.value if self.error_code else None,
             "duration_ms": self.duration_ms,
+            "approval_wait_ms": self.approval_wait_ms,
+            "execution_ms": self.execution_ms,
             "truncated": self.truncated,
         }
 

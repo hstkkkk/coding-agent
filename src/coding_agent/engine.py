@@ -247,8 +247,16 @@ class AgentEngine:
                         emitter,
                         RunStatus.FAILED,
                         repeated_failure,
-                        error_code=ErrorCode.BUDGET_EXHAUSTED,
+                        error_code=ErrorCode.STAGNATION,
                     )
+
+                if (
+                    isinstance(turn.action, ToolCall)
+                    and state.repeated_actions > 1
+                    and self._is_read_only_tool(turn.action.name)
+                ):
+                    self._record_duplicate_read(state, turn, emitter)
+                    continue
 
                 if isinstance(turn.action, FinishRequest):
                     completed = self._handle_finish(state, turn, emitter)
@@ -374,6 +382,8 @@ class AgentEngine:
             status=result.status.value,
             error_code=result.error_code.value if result.error_code else None,
             duration_ms=result.duration_ms,
+            approval_wait_ms=result.approval_wait_ms,
+            execution_ms=result.execution_ms,
             workspace_version=state.workspace_version,
             recovery_output_id=result.data.get("recovery_output_id"),
             recovery_path=result.data.get("recovery_path"),
@@ -532,7 +542,11 @@ class AgentEngine:
 
     def _track_action_fingerprint(self, state: RunState, action: Action) -> str | None:
         encoded = json.dumps(
-            {"name": action_name(action), "arguments": action_arguments(action)},
+            {
+                "workspace_version": state.workspace_version,
+                "name": action_name(action),
+                "arguments": action_arguments(action),
+            },
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -546,6 +560,47 @@ class AgentEngine:
         if state.repeated_actions >= self.options.max_repeated_actions:
             return "the model repeated an identical action without progress"
         return None
+
+    def _is_read_only_tool(self, name: str) -> bool:
+        return any(
+            definition.name == name and definition.risk is RiskLevel.READ_ONLY
+            for definition in self.tools.definitions
+        )
+
+    @staticmethod
+    def _record_duplicate_read(
+        state: RunState,
+        turn: AssistantTurn,
+        emitter: EventEmitter,
+    ) -> None:
+        assert isinstance(turn.action, ToolCall)
+        message = (
+            "identical read-only action skipped because the workspace and request "
+            "are unchanged; use the existing observation and choose a different action"
+        )
+        state.recent_errors.append(f"{ErrorCode.STAGNATION.value}: {message}")
+        state.recent_errors = state.recent_errors[-10:]
+        state.steps.append(
+            StepRecord(
+                step=state.model_turns,
+                workspace_version=state.workspace_version,
+                rationale=turn.rationale,
+                action_name=turn.action.name,
+                arguments=dict(turn.action.arguments),
+                result={
+                    "tool": turn.action.name,
+                    "status": "SKIPPED",
+                    "error_code": ErrorCode.STAGNATION.value,
+                    "message": message,
+                },
+            )
+        )
+        emitter.emit(
+            "tool_skipped",
+            tool=turn.action.name,
+            detail=describe_tool(turn.action.name, turn.action.arguments),
+            reason=message,
+        )
 
     @staticmethod
     def _record_protocol_error(
@@ -569,7 +624,10 @@ class AgentEngine:
                 },
             )
         )
-        emitter.emit("warning", message="model action protocol was rejected")
+        emitter.emit(
+            "warning",
+            message=f"model action protocol rejected: {message[:500]}",
+        )
 
     @staticmethod
     def _terminal(
