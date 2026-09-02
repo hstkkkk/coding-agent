@@ -222,6 +222,24 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual(events.events[-1].data["status"], "ANSWERED")
         self.assertIn("respond", {tool.name for tool in model.requests[0].tools})
 
+    def test_serialized_proposal_count_is_recorded_without_extra_execution(self) -> None:
+        result, _, tools, events = self.run_engine(
+            [
+                AssistantTurn(
+                    "answer directly",
+                    AnswerRequest("answer", "Only the first action is used."),
+                    proposed_action_count=2,
+                )
+            ]
+        )
+
+        self.assertEqual(result.status, RunStatus.ANSWERED)
+        self.assertEqual(tools.calls, [])
+        model_event = next(
+            event for event in events.events if event.kind == "model_action"
+        )
+        self.assertEqual(model_event.data["proposed_actions"], 2)
+
     def test_objective_replaces_unpaired_surrogates_before_model_request(self) -> None:
         malformed = "Who are you?" + chr(0xDC81)
 

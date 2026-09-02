@@ -306,6 +306,7 @@ class AgentEngine:
                     ),
                     rationale=turn.rationale[:1_000],
                     repeated=state.repeated_actions,
+                    proposed_actions=max(1, turn.proposed_action_count),
                 )
                 if state.finalization_mode and not isinstance(
                     turn.action,

@@ -128,12 +128,13 @@ class OpenAICompatibleAdapter(ModelPort):
     ) -> AssistantTurn:
         message_obj = require_object(message, "assistant message")
         tool_calls = message_obj.get("tool_calls")
-        if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+        if not isinstance(tool_calls, list) or not tool_calls:
             count = len(tool_calls) if isinstance(tool_calls, list) else 0
             raise ModelProtocolError(
-                f"assistant must return exactly one tool call; received {count}"
+                f"assistant must return at least one tool call; received {count}"
             )
 
+        proposed_action_count = len(tool_calls)
         call = require_object(tool_calls[0], "tool call")
         call_id = require_string(call.get("id"), "tool call id")
         function = require_object(call.get("function"), "tool call function")
@@ -179,7 +180,11 @@ class OpenAICompatibleAdapter(ModelPort):
             )
         else:
             action = ToolCall(call_id=call_id, name=name, arguments=arguments)
-        return AssistantTurn(rationale=rationale, action=action)
+        return AssistantTurn(
+            rationale=rationale,
+            action=action,
+            proposed_action_count=proposed_action_count,
+        )
 
 
 ScriptedResponse = AssistantTurn | Exception | Callable[[ModelRequest], AssistantTurn]

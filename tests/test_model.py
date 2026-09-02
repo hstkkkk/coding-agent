@@ -8,6 +8,7 @@ from coding_agent.domain import (
     ModelProtocolError,
     ModelRequest,
     RiskLevel,
+    ToolCall,
     ToolDefinition,
 )
 from coding_agent.model import OpenAICompatibleAdapter
@@ -208,17 +209,43 @@ class ModelAdapterTests(unittest.TestCase):
         with self.assertRaises(ModelProtocolError):
             adapter.complete(ModelRequest("system", "task", (ANSWER_TOOL,)))
 
-    def test_rejects_multiple_actions(self) -> None:
-        tool_call = {
+    def test_serializes_multiple_actions_by_normalizing_only_the_first(self) -> None:
+        first_call = {
             "id": "call-1",
             "type": "function",
             "function": {"name": "read_file", "arguments": '{"path":"x.py"}'},
         }
+        second_call = {
+            "id": "call-2",
+            "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path":"y.py"}'},
+        }
         adapter = StubAdapter(
-            {"choices": [{"message": {"content": "", "tool_calls": [tool_call, tool_call]}}]}
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [first_call, second_call],
+                        }
+                    }
+                ]
+            }
         )
 
-        with self.assertRaises(ModelProtocolError):
+        turn = adapter.complete(ModelRequest("system", "task", (READ_TOOL,)))
+
+        self.assertIsInstance(turn.action, ToolCall)
+        assert isinstance(turn.action, ToolCall)
+        self.assertEqual(turn.action.arguments, {"path": "x.py"})
+        self.assertEqual(turn.proposed_action_count, 2)
+
+    def test_rejects_a_response_without_any_action(self) -> None:
+        adapter = StubAdapter(
+            {"choices": [{"message": {"content": "", "tool_calls": []}}]}
+        )
+
+        with self.assertRaisesRegex(ModelProtocolError, "at least one tool call"):
             adapter.complete(ModelRequest("system", "task", (READ_TOOL,)))
 
     def test_rejects_unknown_tool(self) -> None:

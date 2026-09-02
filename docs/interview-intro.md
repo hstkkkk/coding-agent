@@ -1,13 +1,13 @@
 # One-minute English introduction
 
-I built a controller-driven coding agent for small tasks in local Git
-repositories. Instead of letting the language model control the process, the
-model can propose only one structured action per turn. My controller validates
-permissions, executes local file or command tools, records the real result, and
-feeds that observation into the next turn. File edits use hashes to prevent
-stale overwrites, while commands require explicit approval and run without a
-shell or access to the model API key. Most importantly, the model can only
-request completion. The controller accepts it after successful verification on
-the current workspace version. I also built an offline test suite and an
-independent evaluation harness with hidden tests to measure false successes.
+I built a controller-driven coding agent for local Git repositories. The model
+suggests actions, but my controller owns the process. It accepts one action per
+turn; if a provider returns several tool calls, the adapter executes only the
+first. The controller validates permissions, runs local file and command tools,
+records actual results, and feeds them into the next turn. Hash-guarded edits
+prevent stale overwrites. Commands require approval, avoid the shell, and never
+receive the model API key. The model can only request completion, which the
+controller accepts after fresh verification on the current workspace version.
+I also built resumable context, offline tests, and an independent evaluation
+harness with hidden tests to detect false successes.
 

@@ -99,10 +99,13 @@ class TerminalTheme:
         detail: str,
         rationale: str,
         repeated: int | None,
+        proposed_actions: int = 1,
     ) -> str:
         details = [detail] if detail else []
         if repeated is not None and repeated > 1:
             details.append(f"repeated {repeated}x")
+        if proposed_actions > 1:
+            details.append(f"serialized 1 of {proposed_actions}")
         suffix = f"  {' · '.join(details)}" if details else ""
         line = (
             f"{self.paint('●', 'accent')} "

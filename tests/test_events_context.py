@@ -52,7 +52,11 @@ class EventAndContextTests(unittest.TestCase):
                 sequence=1,
                 kind="model_action",
                 timestamp="now",
-                data={"action": "read_file", "detail": "path=index.html"},
+                data={
+                    "action": "read_file",
+                    "detail": "path=index.html",
+                    "proposed_actions": 2,
+                },
             )
         )
         sink.emit(
@@ -72,6 +76,7 @@ class EventAndContextTests(unittest.TestCase):
 
         rendered = _without_ansi(output.getvalue())
         self.assertIn("● Read  path=index.html", rendered)
+        self.assertIn("serialized 1 of 2", rendered)
         self.assertIn("└ ✓ Read  path=index.html · lines=1-20 · 3 ms", rendered)
 
     def test_console_progress_uses_structured_detail_without_empty_colons(self) -> None:
@@ -90,6 +95,7 @@ class EventAndContextTests(unittest.TestCase):
                         "detail": "path=src · recursive",
                         "rationale": "",
                         "repeated": 2,
+                        "proposed_actions": 2,
                     },
                 )
             )
@@ -113,6 +119,7 @@ class EventAndContextTests(unittest.TestCase):
             "[MODEL] list_directory · path=src · recursive · repeated 2x",
             rendered,
         )
+        self.assertIn("serialized 1 of 2", rendered)
         self.assertIn(
             "[TOOL] list_directory · path=src · 3 entries -> COMPLETED (4 ms)",
             rendered,

@@ -1,9 +1,11 @@
 # Bounded Coding Agent
 
 A small, controller-driven coding agent for one local Git repository at a time.
-The model may propose exactly one structured action per turn; a local controller
-validates and executes the action, records the observation, and decides whether
-the run may stop.
+The controller accepts exactly one structured action per turn, validates and
+executes it, records the observation, and decides whether the run may stop. If
+an OpenAI-compatible provider returns several tool calls in one response, the
+adapter serializes the batch by selecting only the first; later actions must be
+proposed again against the updated workspace.
 
 This is an original implementation of the agent loop. It uses no agent SDK or
 hosted file/command tool. Runtime code depends only on the Python standard
@@ -131,8 +133,10 @@ export CODING_AGENT_THINKING="disabled"
 `CODING_AGENT_THINKING` accepts `enabled` or `disabled`. Leave it unset to
 preserve the provider default. The equivalent command-line option is
 `--thinking enabled|disabled`. When Thinking is enabled, the adapter uses
-automatic tool selection for compatibility and still requires exactly one
-valid structured action before the controller proceeds. See
+automatic tool selection for compatibility. Response normalization still gives
+the controller exactly one valid structured action. A provider batch is not
+executed in parallel: only its first call crosses the adapter boundary, and the
+proposed count is recorded in the action event. See
 [docs/configuration.md](docs/configuration.md) for the complete schema, ranges,
 precedence rules, and security notes.
 

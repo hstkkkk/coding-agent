@@ -81,8 +81,11 @@ data model.
 The model adapter normally requires a tool call at the HTTP protocol layer.
 Providers that expose explicit Thinking mode may reject forced tool selection,
 so `thinking=enabled` uses automatic tool selection instead. This relaxes only
-the vendor request parameter: response normalization and `AgentEngine` still
-require exactly one allowlisted structured action before anything executes.
+the vendor request parameter. Some compatible providers return multiple tool
+calls even when the prompt requests one. The adapter deterministically selects
+and validates only the first call, records the original proposal count, and
+discards the rest. `AgentEngine` therefore still receives exactly one
+allowlisted structured action before anything executes.
 
 ## Configuration startup
 
@@ -129,9 +132,14 @@ Every model turn must normalize to exactly one of:
 ToolCall | AnswerRequest | FinishRequest | BlockedRequest
 ```
 
-Multiple tool calls, unknown tools, or malformed arguments are protocol errors.
-The controller permits a bounded correction attempt without executing a
-partial action.
+A vendor response containing several tool calls is serialized at the adapter
+boundary: only the first is normalized, and every later call is discarded
+without validation or execution. The next model request is rebuilt from the
+real result and current workspace, so any remaining operation must be proposed
+again. The action event records `proposed_actions` for audit. A response with no
+tool call, an unknown first tool, or malformed first-call arguments remains a
+protocol error; the controller permits a bounded correction attempt without
+executing a partial action.
 
 `max_model_turns` bounds normal work decisions. If the last permitted work
 decision produces fresh completion evidence, the controller grants exactly one
@@ -265,8 +273,8 @@ verified code change.
 ## Error and retry policy
 
 Temporary model transport failures use bounded exponential backoff.
-Authentication and malformed requests do not retry. Model protocol mistakes
-receive structured feedback up to a small limit. File conflicts, command
+Authentication and malformed requests do not retry. Empty or malformed model
+actions receive structured feedback up to a small limit. File conflicts, command
 failures, timeouts, approval denials, and policy denials become observations;
 non-idempotent local actions are never retried automatically.
 

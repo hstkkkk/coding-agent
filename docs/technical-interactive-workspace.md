@@ -13,6 +13,13 @@ The implementation must preserve the current controller contract:
 - Git operations exposed to the model remain read-only;
 - runtime dependencies remain Python standard library only.
 
+The vendor adapter may receive more than one native tool call despite that
+single-action contract. It serializes such a proposal by normalizing only the
+first call and recording the original count. Discarded calls never reach the
+engine, policy, or tool runtime; they must be proposed again after the first
+real observation. This preserves one-action state transitions without relying
+on provider-specific parallel-tool settings.
+
 Automatic initialization is a trusted CLI startup operation requested by the
 human. It is not a new model-visible tool and does not relax the runtime Git
 write policy.

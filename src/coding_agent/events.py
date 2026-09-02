@@ -118,6 +118,10 @@ class ConsoleEventSink(EventSink):
             repeated = data.get("repeated")
             if isinstance(repeated, int) and repeated > 1:
                 parts.append(f"repeated {repeated}x")
+            proposed = data.get("proposed_actions")
+            proposed_count = proposed if isinstance(proposed, int) else 1
+            if proposed_count > 1:
+                parts.append(f"serialized 1 of {proposed_count}")
             rationale = _console_text(data.get("rationale", ""), limit=180)
             if self._theme.enabled:
                 repeated_value = repeated if isinstance(repeated, int) else None
@@ -127,6 +131,7 @@ class ConsoleEventSink(EventSink):
                         _console_text(data.get("detail", "")),
                         rationale,
                         repeated_value,
+                        proposed_count,
                     )
                 )
             else:

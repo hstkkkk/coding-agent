@@ -107,6 +107,7 @@ class AssistantTurn:
     rationale: str
     action: Action
     plan_update: JsonObject | None = None
+    proposed_action_count: int = 1
 
 
 @dataclass(frozen=True, slots=True)
