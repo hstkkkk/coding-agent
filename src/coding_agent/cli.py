@@ -292,6 +292,7 @@ def _tui(args: argparse.Namespace) -> int:
     session = InteractiveSession(
         conversation=conversation,
         model_label=args.model,
+        thinking_label=args.thinking or "provider default",
     )
     return session.run(runner.run)
 

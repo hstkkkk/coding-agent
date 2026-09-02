@@ -247,9 +247,9 @@ class InteractiveSession:
         ...
 ```
 
-The constructor accepts a `ConversationSession`, model label, and optional
-input/output streams. Tests use a temporary `ConversationStore`, `StringIO`, and
-a fake `run_task`; production uses the durable session and
+The constructor accepts a `ConversationSession`, model and thinking-mode labels,
+and optional input/output streams. Tests use a temporary `ConversationStore`,
+`StringIO`, and a fake `run_task`; production uses the durable session and
 `LocalAgentRunner.run`.
 
 ### Loop
@@ -269,7 +269,8 @@ in compacted memory. `/session` prints the short reference and full ID.
 same-workspace `SessionInfo` values; `/resume <prefix>` bypasses the selector.
 Switching replaces only `ConversationSession`, because every offered session is
 bound to the already-constructed runner's workspace. The banner distinguishes
-new from resumed sessions, and exit prints the short resume command.
+new from resumed sessions, shows the configured thinking mode beside the model,
+and exit prints the short resume command.
 
 The terminal uses ANSI styling only when output is a TTY and `NO_COLOR` is not
 set. Plain text is the complete fallback, which keeps Windows and redirected

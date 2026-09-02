@@ -148,6 +148,9 @@ creates a fresh bounded run with its own ID, budgets, event log, artifacts, and
 verification evidence. Completed requests and assistant outcomes persist in a
 redacted per-user session log. A bounded view supplies continuity to follow-up
 tasks without carrying approval or verification state between runs.
+The banner prints both the selected model and the effective configured thinking
+mode (`enabled`, `disabled`, or `provider default`) so model-quality experiments
+are auditable from the terminal itself.
 
 In an interactive terminal, typing `/` immediately opens the command list.
 Use the up/down arrows to move the reverse-video highlight, then press Enter to
@@ -343,6 +346,17 @@ coding-agent eval --suite evaluation/suite.json
 
 The report includes pass rate, false-success count, model turns, tool calls,
 workspace versions, changed files, and independent Oracle results.
+
+When a provider supports both modes, compare them with the same suite rather
+than inferring quality from one interactive run:
+
+```powershell
+coding-agent eval --suite evaluation/suite.json --thinking disabled
+coding-agent eval --suite evaluation/suite.json --thinking enabled
+```
+
+Keep all other settings and repetitions identical. A mode that the provider
+does not support should be treated as incompatible, not as a quality result.
 
 ## Safety limits
 

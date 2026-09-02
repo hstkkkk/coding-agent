@@ -60,6 +60,7 @@ class InteractiveSessionTests(unittest.TestCase):
         self.assertIn("summary-7", objectives[-1])
         rendered = output.getvalue()
         self.assertIn("Bounded Coding Agent", rendered)
+        self.assertIn("Thinking: provider default", rendered)
         self.assertIn("Session:", rendered)
         self.assertIn("Type / to browse commands", rendered)
         self.assertIn("SUCCEEDED", rendered)

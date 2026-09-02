@@ -31,6 +31,7 @@ class InteractiveSession:
         *,
         conversation: ConversationSession,
         model_label: str,
+        thinking_label: str = "provider default",
         input_stream: TextIO | None = None,
         output_stream: TextIO | None = None,
         styled: bool | None = None,
@@ -38,6 +39,7 @@ class InteractiveSession:
         self.conversation = conversation
         self.workspace = conversation.workspace
         self.model_label = model_label
+        self.thinking_label = thinking_label
         self.input = input_stream or sys.stdin
         self.output = output_stream or sys.stdout
         self.styled = self._detect_styling() if styled is None else styled
@@ -136,6 +138,7 @@ class InteractiveSession:
             self._style("Bounded Coding Agent", "1;36")
             + f"\nWorkspace: {self.workspace}"
             + f"\nModel: {self.model_label}"
+            + f"\nThinking: {self.thinking_label}"
             + f"\nSession: {self.conversation.reference} "
             + ("(resumed)" if self.conversation.resumed else "(new)")
             + "\nType / to browse commands, or /exit to quit.\n\n"
