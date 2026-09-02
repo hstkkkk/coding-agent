@@ -172,7 +172,8 @@ derived view containing:
 - workspace version and changed paths;
 - recent verification records and errors;
 - recent tool actions and normalized observations, with byte-identical
-  read-only observations deduplicated for the same workspace version;
+  read-only observations deduplicated and covered `read_file` ranges served
+  from controller memory for the same workspace version;
 - the current tool schemas.
 
 Old events remain on disk when they fall out of the model view. Repository
@@ -226,13 +227,22 @@ receive structured feedback up to a small limit. File conflicts, command
 failures, timeouts, approval denials, and policy denials become observations;
 non-idempotent local actions are never retried automatically.
 
-The second identical consecutive read-only action is skipped and becomes a
-structured corrective observation; a third identical action triggers the
-dedicated `STAGNATION` terminal error. The fingerprint includes workspace
-version, so a later mutation invalidates an earlier read. Model turns, wall
-time, command time, output volume, and protocol mistakes all have
-controller-owned limits. Tool events record total time, approval-wait time, and
-actual execution time separately. Protocol warnings retain the bounded exact
+Successful file reads form an in-run, workspace-version-scoped cache. A later
+request for a fully covered range receives the requested slice as a `CACHED`
+observation without another filesystem call. After two consecutive cache hits,
+the controller withholds `read_file` for one model decision so an alternating
+range loop must choose an edit, another inspection mechanism, verification, a
+response, or an explicit blocker. Any recorded workspace mutation invalidates
+the cache by advancing the version; disjoint and uncovered ranges still execute
+normally.
+
+For other read-only tools, the second identical consecutive action is skipped
+and becomes a structured corrective observation; a third identical action
+triggers the dedicated `STAGNATION` terminal error. The fingerprint includes
+workspace version, so a later mutation invalidates an earlier observation.
+Model turns, wall time, command time, output volume, and protocol mistakes all
+have controller-owned limits. Tool events record total time, approval-wait time,
+and actual execution time separately. Protocol warnings retain the bounded exact
 rejection reason and pass through the normal redaction boundary.
 
 ## Evaluation

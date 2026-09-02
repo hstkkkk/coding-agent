@@ -316,13 +316,17 @@ redacted.
 
 Tool timing distinguishes controller/approval latency from execution. The
 console prints `execution_ms` and, when nonzero, `approval_wait_ms`; the total
-`duration_ms` remains in structured events. The engine skips the second
-identical consecutive read-only action and records explicit corrective context,
-then terminates a third with `STAGNATION`. Context construction also removes
-older byte-identical read observations for the same workspace version so a
-weak model cannot fill its window by rereading one file range. Protocol-error
-events carry the bounded concrete validation reason through the same redaction
-and control-character-safe presentation path.
+`duration_ms` remains in structured events. Successful `read_file` observations
+also form a workspace-version-scoped controller cache: covered ranges are
+returned as `CACHED` without another filesystem call. Two consecutive cache hits
+temporarily remove `read_file` from the next model decision, breaking both exact
+and alternating overlapping-range loops. Outside that one recovery decision,
+disjoint and otherwise uncovered reads remain available and execute normally.
+For other read-only tools, the engine skips the second identical consecutive
+action and terminates a third with `STAGNATION`. Context construction also
+removes older byte-identical observations for the same workspace version.
+Protocol-error events carry the bounded concrete validation reason through the
+same redaction and control-character-safe presentation path.
 
 The model protocol adds `respond(message) -> AnswerRequest`. `AgentEngine`
 accepts it as terminal `ANSWERED` only when `workspace_version == 0` and no

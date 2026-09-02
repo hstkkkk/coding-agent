@@ -82,6 +82,30 @@ class EventAndContextTests(unittest.TestCase):
 
         self.assertEqual(output.getvalue(), "[ANSWER] I am a coding agent.\n")
 
+    def test_console_labels_controller_cached_reads(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            ConsoleEventSink().emit(
+                RunEvent(
+                    run_id="run",
+                    sequence=1,
+                    kind="tool_cached",
+                    timestamp="now",
+                    data={
+                        "tool": "read_file",
+                        "detail": "path=index.html · lines=150-260",
+                        "reason": "served from the controller read cache",
+                    },
+                )
+            )
+
+        self.assertEqual(
+            output.getvalue(),
+            "[TOOL] read_file · path=index.html · lines=150-260 -> CACHED · "
+            "served from the controller read cache\n",
+        )
+
     def test_console_reports_how_to_restore_a_before_image(self) -> None:
         output = io.StringIO()
         recovery_id = "b" * 32

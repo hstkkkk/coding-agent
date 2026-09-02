@@ -150,6 +150,13 @@ class ConsoleEventSink(EventSink):
                 f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{suffix} -> "
                 f"SKIPPED · {_console_text(data.get('reason', ''))}"
             )
+        elif event.kind == "tool_cached":
+            detail = _console_text(data.get("detail", ""))
+            suffix = f" · {detail}" if detail else ""
+            print(
+                f"[TOOL] {_console_text(data.get('tool', 'unknown'))}{suffix} -> "
+                f"CACHED · {_console_text(data.get('reason', ''))}"
+            )
         elif event.kind == "terminal":
             if data.get("status") == "ANSWERED":
                 print(f"[ANSWER] {_console_text(data.get('summary', ''), limit=4_000)}")

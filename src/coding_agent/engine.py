@@ -136,6 +136,7 @@ _VISUAL_OBJECTIVE_TERMS = (
     "质感",
     "效果",
 )
+_READ_CACHE_RECOVERY_THRESHOLD = 2
 
 
 class SystemClock(Clock):
@@ -266,6 +267,7 @@ class AgentEngine:
                     continue
 
                 state.protocol_errors = 0
+                cached_read = self._find_cached_read(state, turn.action)
                 repeated_failure = self._track_action_fingerprint(state, turn.action)
                 emitter.emit(
                     "model_action",
@@ -278,6 +280,9 @@ class AgentEngine:
                     rationale=turn.rationale[:1_000],
                     repeated=state.repeated_actions,
                 )
+                if cached_read is not None:
+                    self._record_cached_read(state, turn, cached_read, emitter)
+                    continue
                 if repeated_failure:
                     return self._terminal(
                         state,
@@ -352,6 +357,13 @@ class AgentEngine:
     ) -> AssistantTurn:
         tools = self.tools.definitions + CONTROL_DEFINITIONS
         request = self.context.build(state, tools)
+        if self._consecutive_cached_reads(state) >= _READ_CACHE_RECOVERY_THRESHOLD:
+            request = replace(
+                request,
+                tools=tuple(
+                    definition for definition in request.tools if definition.name != "read_file"
+                ),
+            )
         last_error: ModelTransientError | None = None
         for attempt in range(1, self.options.model_retry_attempts + 1):
             budget_failure = self._check_budget(state, started)
@@ -635,6 +647,83 @@ class AgentEngine:
             return "the model repeated an identical action without progress"
         return None
 
+    @staticmethod
+    def _find_cached_read(state: RunState, action: Action) -> dict[str, Any] | None:
+        if not isinstance(action, ToolCall) or action.name != "read_file":
+            return None
+        request = _validated_read_request(action.arguments)
+        if request is None:
+            return None
+        path, requested_start, requested_end = request
+
+        for step in reversed(state.steps):
+            if step.workspace_version != state.workspace_version:
+                continue
+            if step.action_name != "read_file" or step.arguments.get("path") != path:
+                continue
+            result = step.result
+            if result.get("status") != ToolStatus.COMPLETED.value:
+                continue
+            data = result.get("data")
+            if not isinstance(data, dict):
+                continue
+            cached = _slice_cached_read(data, requested_start, requested_end)
+            if cached is not None:
+                return cached
+        return None
+
+    @staticmethod
+    def _record_cached_read(
+        state: RunState,
+        turn: AssistantTurn,
+        cached_data: dict[str, Any],
+        emitter: EventEmitter,
+    ) -> None:
+        assert isinstance(turn.action, ToolCall)
+        message = "served from the controller read cache; no filesystem access was needed"
+        cached_count = AgentEngine._consecutive_cached_reads(state) + 1
+        if cached_count >= _READ_CACHE_RECOVERY_THRESHOLD:
+            message += (
+                "; read_file will be unavailable for the next decision because repeated "
+                "covered reads are not progress—use the available content to edit, search, "
+                "verify, respond, or report a concrete blocker"
+            )
+        result = ToolResult(
+            action_id=uuid.uuid4().hex,
+            tool_name=turn.action.name,
+            status=ToolStatus.COMPLETED,
+            message=message,
+            data=cached_data,
+        )
+        state.steps.append(
+            StepRecord(
+                step=state.model_turns,
+                workspace_version=state.workspace_version,
+                rationale=turn.rationale,
+                action_name=turn.action.name,
+                arguments=dict(turn.action.arguments),
+                result=result.for_model(),
+            )
+        )
+        emitter.emit(
+            "tool_cached",
+            tool=turn.action.name,
+            detail=describe_tool(turn.action.name, turn.action.arguments),
+            reason=message,
+        )
+
+    @staticmethod
+    def _consecutive_cached_reads(state: RunState) -> int:
+        count = 0
+        for step in reversed(state.steps):
+            if step.workspace_version != state.workspace_version or step.action_name != "read_file":
+                break
+            result_data = step.result.get("data")
+            if not isinstance(result_data, dict) or result_data.get("cached") is not True:
+                break
+            count += 1
+        return count
+
     def _is_read_only_tool(self, name: str) -> bool:
         return any(
             definition.name == name and definition.risk is RiskLevel.READ_ONLY
@@ -736,6 +825,82 @@ class AgentEngine:
             tool_calls=state.tool_calls,
             workspace_version=state.workspace_version,
         )
+
+
+def _validated_read_request(
+    arguments: dict[str, Any],
+) -> tuple[str, int, int | None] | None:
+    if set(arguments) - {"path", "start_line", "end_line"}:
+        return None
+    path = arguments.get("path")
+    start_line = arguments.get("start_line", 1)
+    end_line = arguments.get("end_line")
+    if not isinstance(path, str) or not path:
+        return None
+    if not isinstance(start_line, int) or isinstance(start_line, bool) or start_line < 1:
+        return None
+    if end_line is not None and (
+        not isinstance(end_line, int)
+        or isinstance(end_line, bool)
+        or end_line < start_line
+    ):
+        return None
+    return path, start_line, end_line
+
+
+def _slice_cached_read(
+    data: dict[str, Any],
+    requested_start: int,
+    requested_end: int | None,
+) -> dict[str, Any] | None:
+    content = data.get("content")
+    cached_start = data.get("start_line")
+    cached_end = data.get("end_line")
+    observed_lines = data.get("observed_lines")
+    if not isinstance(content, str):
+        return None
+    if (
+        not isinstance(cached_start, int)
+        or isinstance(cached_start, bool)
+        or cached_start < 1
+        or not isinstance(cached_end, int)
+        or isinstance(cached_end, bool)
+        or cached_end < 0
+        or not isinstance(observed_lines, int)
+        or isinstance(observed_lines, bool)
+        or observed_lines < 0
+        or cached_start > requested_start
+    ):
+        return None
+
+    reaches_eof = data.get("truncated") is False and cached_end >= observed_lines
+    if requested_end is None:
+        if not reaches_eof:
+            return None
+        actual_end = observed_lines
+    elif requested_end <= cached_end:
+        actual_end = requested_end
+    elif reaches_eof:
+        actual_end = observed_lines
+    else:
+        return None
+
+    start_offset = requested_start - cached_start
+    end_offset = max(start_offset, actual_end - cached_start + 1)
+    lines = content.splitlines(keepends=True)
+    if start_offset > len(lines) or end_offset > len(lines):
+        return None
+
+    cached_data = dict(data)
+    cached_data.update(
+        {
+            "content": "".join(lines[start_offset:end_offset]),
+            "start_line": requested_start,
+            "end_line": actual_end,
+            "cached": True,
+        }
+    )
+    return cached_data
 
 
 def _optional_string(value: Any) -> str | None:

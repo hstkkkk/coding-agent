@@ -38,6 +38,7 @@ class FakeToolRuntime:
         changed_file: str = "app.py",
     ) -> None:
         self.definitions = (
+            ToolDefinition("read_file", "read", TOOL_SCHEMA, RiskLevel.READ_ONLY),
             ToolDefinition("edit_file", "edit", TOOL_SCHEMA, RiskLevel.WORKSPACE_WRITE),
             ToolDefinition("run_command", "run", TOOL_SCHEMA, RiskLevel.EXECUTION),
             ToolDefinition("browser_check", "render", TOOL_SCHEMA, RiskLevel.EXECUTION),
@@ -47,12 +48,34 @@ class FakeToolRuntime:
         self.diff_chars = diff_chars
         self.diff_truncated = diff_truncated
         self.changed_file = changed_file
+        self.read_content = "".join(f"line {line}\n" for line in range(1, 410))
 
     def initial_workspace_state(self):
         return {"git_available": True, "git_head": "abc", "git_status": ""}
 
     def execute(self, call: ToolCall, action_id: str) -> ToolResult:
         self.calls.append(call.name)
+        if call.name == "read_file":
+            lines = self.read_content.splitlines(keepends=True)
+            start_line = int(call.arguments.get("start_line", 1))
+            requested_end = call.arguments.get("end_line")
+            end_line = int(requested_end) if requested_end is not None else len(lines)
+            selected = "".join(lines[start_line - 1 : end_line])
+            return ToolResult(
+                action_id,
+                call.name,
+                ToolStatus.COMPLETED,
+                "tool completed",
+                data={
+                    "path": str(call.arguments.get("path", "")),
+                    "content": selected,
+                    "sha256": "f" * 64,
+                    "start_line": start_line,
+                    "end_line": min(end_line, len(lines)),
+                    "observed_lines": len(lines),
+                    "truncated": False,
+                },
+            )
         if call.name == "edit_file":
             return ToolResult(
                 action_id,
@@ -353,6 +376,88 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual(tools.calls, ["git_diff"])
         self.assertIn("unchanged", model.requests[2].user_prompt)
         self.assertTrue(any(event.kind == "tool_skipped" for event in events.events))
+
+    def test_covered_read_ranges_are_cached_and_force_a_progress_decision(self) -> None:
+        def edit_after_recovery_prompt(request) -> AssistantTurn:
+            available = {tool.name for tool in request.tools}
+            self.assertNotIn("read_file", available)
+            self.assertIn("served from the controller read cache", request.user_prompt)
+            self.assertIn('"content": "line 150\\nline 151\\n', request.user_prompt)
+            self.assertIn('line 409\\n"', request.user_prompt)
+            return edit_turn()
+
+        result, _, tools, events = self.run_engine(
+            [
+                AssistantTurn("read file", ToolCall("r1", "read_file", {"path": "app.py"})),
+                AssistantTurn(
+                    "read middle",
+                    ToolCall(
+                        "r2",
+                        "read_file",
+                        {"path": "app.py", "start_line": 150, "end_line": 260},
+                    ),
+                ),
+                AssistantTurn(
+                    "read overlapping tail",
+                    ToolCall(
+                        "r3",
+                        "read_file",
+                        {"path": "app.py", "start_line": 150, "end_line": 409},
+                    ),
+                ),
+                edit_after_recovery_prompt,
+                verify_turn(),
+                finish_from_context,
+            ]
+        )
+
+        self.assertEqual(result.status, RunStatus.SUCCEEDED)
+        self.assertEqual(tools.calls.count("read_file"), 1)
+        self.assertEqual(
+            len([event for event in events.events if event.kind == "tool_cached"]),
+            2,
+        )
+
+    def test_read_cache_does_not_cross_a_workspace_mutation(self) -> None:
+        result, _, tools, _ = self.run_engine(
+            [
+                AssistantTurn("read file", ToolCall("r1", "read_file", {"path": "app.py"})),
+                edit_turn(),
+                AssistantTurn("read changed file", ToolCall("r2", "read_file", {"path": "app.py"})),
+                verify_turn(),
+                finish_from_context,
+            ]
+        )
+
+        self.assertEqual(result.status, RunStatus.SUCCEEDED)
+        self.assertEqual(tools.calls.count("read_file"), 2)
+
+    def test_read_cache_does_not_hide_an_unobserved_range(self) -> None:
+        result, _, tools, events = self.run_engine(
+            [
+                AssistantTurn(
+                    "read first range",
+                    ToolCall(
+                        "r1",
+                        "read_file",
+                        {"path": "app.py", "start_line": 1, "end_line": 100},
+                    ),
+                ),
+                AssistantTurn(
+                    "read second range",
+                    ToolCall(
+                        "r2",
+                        "read_file",
+                        {"path": "app.py", "start_line": 101, "end_line": 200},
+                    ),
+                ),
+                AssistantTurn("answer", AnswerRequest("answer", "inspection complete")),
+            ]
+        )
+
+        self.assertEqual(result.status, RunStatus.ANSWERED)
+        self.assertEqual(tools.calls.count("read_file"), 2)
+        self.assertFalse(any(event.kind == "tool_cached" for event in events.events))
 
 
 if __name__ == "__main__":

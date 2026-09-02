@@ -41,8 +41,12 @@ quality that the rendered DOM and screenshot do not establish.
 Do not repeat an unchanged read-only action: its prior observation is already
 available and the controller may skip or reject the duplicate. Re-read only
 after a workspace change or with a meaningfully different path, range, or
-query. Preserve working files and prefer hash-guarded edit_file or write_file;
-do not delete and recreate a file merely to replace its contents.
+query. A read_file result marked cached contains the requested fresh range from
+an earlier read at the current workspace version. After repeated covered reads,
+read_file may be withheld for one decision: use the available content to make
+progress or report a concrete blocker. Preserve working files and prefer
+hash-guarded edit_file or write_file; do not delete and recreate a file merely
+to replace its contents.
 """
 
 
