@@ -143,8 +143,13 @@ class TerminalPrompt:
                         rendered_width,
                     )
                     continue
+                appending = cursor == len(buffer)
                 buffer.insert(cursor, key)
                 cursor += 1
+                if appending:
+                    self._write(key, flush=True)
+                    rendered_width += _display_width(key)
+                    continue
             else:
                 continue
             rendered_width = self._redraw_line(

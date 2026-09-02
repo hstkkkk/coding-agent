@@ -105,6 +105,16 @@ class TerminalPromptTests(unittest.TestCase):
 
         self.assertEqual(result, "写一个游戏\n")
 
+    def test_long_unicode_input_is_echoed_once_without_full_line_redraws(self) -> None:
+        output = io.StringIO()
+        request = "把沙子的质感、流动效果和交互细节全部修复，并保持现有功能。" * 8
+        prompt = self._prompt([*request, TerminalKey.ENTER], output)
+
+        result = prompt.readline("coding-agent> ")
+
+        self.assertEqual(result, request + "\n")
+        self.assertEqual(output.getvalue(), "coding-agent> " + request + "\n")
+
     def test_escape_or_empty_filter_backspace_cancels_the_menu(self) -> None:
         for key in (TerminalKey.ESCAPE, TerminalKey.BACKSPACE):
             with self.subTest(key=key):

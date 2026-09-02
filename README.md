@@ -152,7 +152,9 @@ In an interactive terminal, typing `/` immediately opens the command list.
 Use the up/down arrows to move the reverse-video highlight, then press Enter to
 complete that command into the editable prompt. Continue editing if needed and
 press Enter again to submit. Typing while the menu is open filters the list.
-Redirected input keeps the plain line-oriented fallback.
+Redirected input keeps the plain line-oriented fallback. Ordinary typing and
+pasted Unicode text are echoed incrementally, so long wrapped requests are not
+reprinted for every character.
 
 Session commands:
 

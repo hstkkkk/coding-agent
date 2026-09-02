@@ -282,7 +282,10 @@ catalog immediately. The menu redraws its fixed-height candidate area in place,
 using reverse video for the selected command. Enter closes the menu and copies
 the selection into the existing editable buffer; only a later Enter returns the
 line to `InteractiveSession`. Selection and prefix filtering stay internal to
-the module. Tests inject semantic key events at the same `readline` interface.
+the module. Appends use terminal-native incremental echo instead of redrawing
+the entire buffer, which keeps long wrapped Chinese or pasted requests linear
+and prevents repeated prompt fragments. Cursor edits retain explicit redraw
+behavior. Tests inject semantic key events at the same `readline` interface.
 
 `KeyboardInterrupt` while reading a prompt prints a cancellation hint and
 returns to the prompt. EOF exits cleanly. A `KeyboardInterrupt` escaping a run
@@ -437,6 +440,8 @@ added solely for tests.
 - `/` opens a command catalog; arrows visibly highlight candidates, the first
   Enter completes without submitting, and filtering, Backspace, Escape,
   Unicode input, and redirected line mode behave deterministically;
+- long Unicode input is returned and echoed exactly once instead of triggering
+  a full-line redraw for every character;
 - `/history`, EOF, `/exit`, and `KeyboardInterrupt` behave deterministically;
 - plain output contains workspace, result status, and run ID.
 
