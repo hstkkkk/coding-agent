@@ -263,8 +263,11 @@ call `readline` directly.
 
 The prompt maintains a Unicode-aware editable buffer with left/right,
 Home/End, Backspace, and Delete behavior. A leading `/` opens the static command
-catalog immediately; selection and prefix filtering stay internal to the
-module. Tests inject semantic key events at the same `readline` interface.
+catalog immediately. The menu redraws its fixed-height candidate area in place,
+using reverse video for the selected command. Enter closes the menu and copies
+the selection into the existing editable buffer; only a later Enter returns the
+line to `InteractiveSession`. Selection and prefix filtering stay internal to
+the module. Tests inject semantic key events at the same `readline` interface.
 
 `KeyboardInterrupt` while reading a prompt prints a cancellation hint and
 returns to the prompt. EOF exits cleanly. A `KeyboardInterrupt` escaping a run
@@ -390,7 +393,8 @@ added solely for tests.
 - wrong-workspace and traversal-shaped session IDs are rejected;
 - secrets and verification IDs do not enter session JSONL;
 - slash commands do not invoke the runner;
-- `/` opens a command catalog; arrow keys, filtering, Backspace, Escape, Enter,
+- `/` opens a command catalog; arrows visibly highlight candidates, the first
+  Enter completes without submitting, and filtering, Backspace, Escape,
   Unicode input, and redirected line mode behave deterministically;
 - `/history`, EOF, `/exit`, and `KeyboardInterrupt` behave deterministically;
 - plain output contains workspace, result status, and run ID.

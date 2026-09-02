@@ -19,7 +19,13 @@ class TerminalPromptTests(unittest.TestCase):
     def test_slash_opens_menu_and_arrows_select_a_command(self) -> None:
         output = io.StringIO()
         prompt = self._prompt(
-            ["/", TerminalKey.DOWN, TerminalKey.DOWN, TerminalKey.ENTER],
+            [
+                "/",
+                TerminalKey.DOWN,
+                TerminalKey.DOWN,
+                TerminalKey.ENTER,
+                TerminalKey.ENTER,
+            ],
             output,
         )
 
@@ -30,8 +36,29 @@ class TerminalPromptTests(unittest.TestCase):
         self.assertIn("Commands", rendered)
         self.assertIn("/help", rendered)
         self.assertIn("/workspace", rendered)
-        self.assertIn("Selected: /history", rendered)
+        self.assertIn("\x1b[7m/history", rendered)
+        self.assertNotIn("Selected:", rendered)
         self.assertIn("↑/↓", rendered)
+
+    def test_enter_completes_selection_without_submitting_the_line(self) -> None:
+        output = io.StringIO()
+        prompt = self._prompt(
+            [
+                "/",
+                TerminalKey.DOWN,
+                TerminalKey.DOWN,
+                TerminalKey.ENTER,
+                " ",
+                "x",
+                TerminalKey.ENTER,
+            ],
+            output,
+        )
+
+        result = prompt.readline("coding-agent> ")
+
+        self.assertEqual(result, "/history x\n")
+        self.assertIn("coding-agent> /history", output.getvalue())
 
     def test_typing_filters_the_menu_and_backspace_edits_filter(self) -> None:
         output = io.StringIO()
@@ -42,6 +69,7 @@ class TerminalPromptTests(unittest.TestCase):
                 "e",
                 TerminalKey.BACKSPACE,
                 "i",
+                TerminalKey.ENTER,
                 TerminalKey.ENTER,
             ],
             output,

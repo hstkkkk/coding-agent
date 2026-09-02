@@ -149,8 +149,10 @@ redacted per-user session log. A bounded view supplies continuity to follow-up
 tasks without carrying approval or verification state between runs.
 
 In an interactive terminal, typing `/` immediately opens the command list.
-Use the up/down arrows and Enter to select, or continue typing to filter the
-list. Redirected input keeps the plain line-oriented fallback.
+Use the up/down arrows to move the reverse-video highlight, then press Enter to
+complete that command into the editable prompt. Continue editing if needed and
+press Enter again to submit. Typing while the menu is open filters the list.
+Redirected input keeps the plain line-oriented fallback.
 
 Session commands:
 

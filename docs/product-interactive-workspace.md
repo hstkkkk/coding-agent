@@ -222,7 +222,9 @@ cancels the current input and keeps the session open; a second immediate exit
 command remains explicit and predictable.
 
 On a real terminal, `/` opens the command candidates before Enter is pressed.
-Up/down arrows change the selection, Enter confirms it, ordinary characters
+Up/down arrows move a reverse-video highlight. The first Enter completes the
+highlighted command into the editable prompt without submitting it; the user
+may continue editing, and a later Enter submits the line. Ordinary characters
 filter by command prefix, Backspace edits the filter or cancels an empty menu,
 and Escape cancels. Redirected stdin retains the deterministic line-mode
 behavior used by scripts.
@@ -294,7 +296,8 @@ subprocesses receive a filtered environment and never run through a shell.
 ## Success criteria
 
 - Bare `coding-agent` reaches a prompt in an existing repository.
-- `/` immediately displays every command and supports keyboard selection.
+- `/` immediately displays every command; arrows visibly highlight a choice,
+  and Enter completes it into the prompt without executing it.
 - A natural-language line launches a real bounded run and returns to the prompt.
 - A pure conversation ends as `ANSWERED` without a file change or rejected
   `finish` loop; `respond` after a mutation is rejected.

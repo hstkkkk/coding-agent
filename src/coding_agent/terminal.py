@@ -97,7 +97,20 @@ class TerminalPrompt:
             elif isinstance(key, str) and _is_printable(key):
                 if key == "/" and not buffer:
                     self._write("/", flush=True)
-                    return self._select_command()
+                    selection = self._select_command()
+                    if selection is TerminalKey.EOF:
+                        return ""
+                    if selection is TerminalKey.ESCAPE:
+                        return "\n"
+                    buffer = list(selection)
+                    cursor = len(buffer)
+                    rendered_width = self._redraw_line(
+                        prompt,
+                        buffer,
+                        cursor,
+                        rendered_width,
+                    )
+                    continue
                 buffer.insert(cursor, key)
                 cursor += 1
             else:
@@ -109,38 +122,33 @@ class TerminalPrompt:
                 rendered_width,
             )
 
-    def _select_command(self) -> str:
-        self._write(
-            "\nCommands (↑/↓ select, Enter confirm, type to filter, Esc cancel):\n"
-        )
-        width = max((len(choice.command) for choice in self.commands), default=0)
-        for choice in self.commands:
-            self._write(f"  {choice.command:<{width}}  {choice.description}\n")
-
+    def _select_command(self) -> str | TerminalKey:
         query = ""
         selected = 0
-        previous_width = 0
-        previous_width = self._render_selection(query, selected, previous_width)
+        menu_lines = max(1, len(self.commands)) + 2
+        self._write("\n")
+        self._render_command_menu(query, selected, menu_lines, redraw=False)
         while True:
             key = self._next_key()
             matches = self._matching_commands(query)
             if key is TerminalKey.INTERRUPT:
                 raise KeyboardInterrupt
             if key is TerminalKey.EOF:
+                self._close_command_menu(menu_lines)
                 self._write("\n", flush=True)
-                return ""
+                return TerminalKey.EOF
             if key is TerminalKey.ESCAPE:
-                self._write("\rCommand menu cancelled." + (" " * previous_width) + "\n")
-                return "\n"
+                self._close_command_menu(menu_lines)
+                self._write("Command menu cancelled.\n", flush=True)
+                return TerminalKey.ESCAPE
             if key is TerminalKey.BACKSPACE:
                 if query:
                     query = query[:-1]
                     selected = 0
                 else:
-                    self._write(
-                        "\rCommand menu cancelled." + (" " * previous_width) + "\n"
-                    )
-                    return "\n"
+                    self._close_command_menu(menu_lines)
+                    self._write("Command menu cancelled.\n", flush=True)
+                    return TerminalKey.ESCAPE
             elif key in {TerminalKey.DOWN, TerminalKey.TAB}:
                 if matches:
                     selected = (selected + 1) % len(matches)
@@ -152,8 +160,8 @@ class TerminalPrompt:
                     command = matches[selected].command
                 else:
                     command = "/" + query
-                self._write("\n", flush=True)
-                return command + "\n"
+                self._close_command_menu(menu_lines)
+                return command
             elif isinstance(key, str) and _is_printable(key):
                 query += key.lower()
                 selected = 0
@@ -165,7 +173,7 @@ class TerminalPrompt:
                 selected %= len(matches)
             else:
                 selected = 0
-            previous_width = self._render_selection(query, selected, previous_width)
+            self._render_command_menu(query, selected, menu_lines, redraw=True)
 
     def _matching_commands(self, query: str) -> list[CommandChoice]:
         prefix = "/" + query.casefold()
@@ -175,23 +183,46 @@ class TerminalPrompt:
             if choice.command.casefold().startswith(prefix)
         ]
 
-    def _render_selection(
+    def _render_command_menu(
         self,
         query: str,
         selected: int,
-        previous_width: int,
-    ) -> int:
+        menu_lines: int,
+        *,
+        redraw: bool,
+    ) -> None:
         matches = self._matching_commands(query)
+        width = max((len(choice.command) for choice in self.commands), default=0)
+        rows = [
+            "Commands (↑/↓ select, Enter complete, type to filter, Esc cancel):"
+        ]
         if matches:
-            choice = matches[selected]
-            filter_label = f"Filter: /{query} · " if query else ""
-            label = f"{filter_label}Selected: {choice.command} — {choice.description}"
+            for index, choice in enumerate(matches):
+                command = f"{choice.command:<{width}}"
+                if index == selected:
+                    command = f"\x1b[7m{command}\x1b[0m"
+                rows.append(f"  {command}  {choice.description}")
         else:
-            label = f"Filter: /{query} · no matching command"
-        width = _display_width(label)
-        padding = " " * max(0, previous_width - width)
-        self._write("\r" + label + padding, flush=True)
-        return width
+            rows.append("  No matching command")
+        while len(rows) < menu_lines - 1:
+            rows.append("")
+        rows.append(f"Filter: /{query}" if query else "Filter: /")
+
+        if redraw:
+            self._write(f"\x1b[{menu_lines}A")
+        for row in rows:
+            self._write("\r\x1b[2K" + row + "\n")
+        self.output.flush()
+
+    def _close_command_menu(self, menu_lines: int) -> None:
+        self._write(f"\x1b[{menu_lines + 1}A")
+        for index in range(menu_lines + 1):
+            self._write("\r\x1b[2K")
+            if index < menu_lines:
+                self._write("\x1b[1B")
+        if menu_lines:
+            self._write(f"\x1b[{menu_lines}A")
+        self._write("\r", flush=True)
 
     def _redraw_line(
         self,
