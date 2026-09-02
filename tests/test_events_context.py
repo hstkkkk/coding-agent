@@ -129,6 +129,36 @@ class EventAndContextTests(unittest.TestCase):
             "[FINALIZE] work-turn budget exhausted; allowing one finish-only decision\n",
         )
 
+    def test_console_announces_progress_and_wrap_up_modes(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            sink = ConsoleEventSink()
+            sink.emit(
+                RunEvent(
+                    run_id="run",
+                    sequence=1,
+                    kind="progress_required",
+                    timestamp="now",
+                    data={"message": "pause inspection and make progress"},
+                )
+            )
+            sink.emit(
+                RunEvent(
+                    run_id="run",
+                    sequence=2,
+                    kind="wrap_up_started",
+                    timestamp="now",
+                    data={"message": "verify and complete"},
+                )
+            )
+
+        self.assertEqual(
+            output.getvalue(),
+            "[FOCUS] pause inspection and make progress\n"
+            "[WRAP-UP] verify and complete\n",
+        )
+
     def test_console_reports_how_to_restore_a_before_image(self) -> None:
         output = io.StringIO()
         recovery_id = "b" * 32

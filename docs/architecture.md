@@ -130,6 +130,14 @@ rejected finish or any non-terminal action ends the run and cannot reopen the
 work loop. The grace decision is never available without current evidence or
 after the wall-clock budget expires.
 
+Two earlier controller-owned modes protect that final budget. Eight consecutive
+read-only actions across tool names activate a one-decision progress gate that
+hides all inspection tools. A workspace-changing run with four normal turns
+remaining enters wrap-up mode and permanently hides source inspection and
+mutation tools for the rest of that run. Wrap-up exposes verification,
+verification-output reading, `finish`, and `report_blocked`; an adapter that
+returns a hidden work action cannot execute it.
+
 ## Tool execution
 
 The model sees thirteen local tools:
@@ -196,6 +204,10 @@ by the controller, including browser evidence for visual Web work. It is a
 finalization hint, not a claim that the implementation is semantically correct,
 and any later mutation makes the previous evidence stale.
 
+It also reports the remaining work turns, consecutive read-only count,
+`progress_required`, and `wrap_up_mode`. These fields explain why the available
+tool set narrowed without allowing model text to change the controller mode.
+
 Old events remain on disk when they fall out of the model view. Repository
 contents and tool output are treated as untrusted data and cannot grant new
 permissions.
@@ -261,6 +273,12 @@ range loop must choose an edit, another inspection mechanism, verification, a
 response, or an explicit blocker. Any recorded workspace mutation invalidates
 the cache by advancing the version; disjoint and uncovered ranges still execute
 normally.
+
+The broader progress counter spans every read-only tool, including cached and
+skipped actions, so alternating `read_file`, `search_text`, and Git observations
+cannot reset it. A write or execution decision resets the counter. Near the
+turn limit, wrap-up takes precedence over this temporary progress gate and
+reserves the remaining decisions for current verification and termination.
 
 For other read-only tools, the second identical consecutive action is skipped
 and becomes a structured corrective observation; a third identical action

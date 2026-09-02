@@ -39,9 +39,11 @@ class FakeToolRuntime:
     ) -> None:
         self.definitions = (
             ToolDefinition("read_file", "read", TOOL_SCHEMA, RiskLevel.READ_ONLY),
+            ToolDefinition("search_text", "search", TOOL_SCHEMA, RiskLevel.READ_ONLY),
             ToolDefinition("edit_file", "edit", TOOL_SCHEMA, RiskLevel.WORKSPACE_WRITE),
             ToolDefinition("run_command", "run", TOOL_SCHEMA, RiskLevel.EXECUTION),
             ToolDefinition("browser_check", "render", TOOL_SCHEMA, RiskLevel.EXECUTION),
+            ToolDefinition("git_status", "status", TOOL_SCHEMA, RiskLevel.READ_ONLY),
             ToolDefinition("git_diff", "diff", TOOL_SCHEMA, RiskLevel.READ_ONLY),
         )
         self.calls: list[str] = []
@@ -463,6 +465,99 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual(len(model.requests), 3)
         self.assertEqual(tools.calls, ["edit_file", "run_command"])
         self.assertTrue(any(event.kind == "finalization_started" for event in events.events))
+
+    def test_wrap_up_reserves_tail_turns_for_current_visual_verification(self) -> None:
+        tools = FakeToolRuntime(changed_file="index.html")
+        inspected = 0
+
+        def inspect_or_complete(request) -> AssistantTurn:
+            nonlocal inspected
+            available = {tool.name for tool in request.tools}
+            if "read_file" in available:
+                inspected += 1
+                return AssistantTurn(
+                    "inspect another range",
+                    ToolCall(
+                        f"read-{inspected}",
+                        "read_file",
+                        {"path": f"view-{inspected}.html"},
+                    ),
+                )
+            self.assertIn('"wrap_up_mode": true', request.user_prompt)
+            self.assertEqual(
+                available,
+                {"run_command", "browser_check", "finish", "report_blocked"},
+            )
+            if '"completion_evidence_ready": true' in request.user_prompt:
+                return finish_with_latest_evidence(request)
+            return AssistantTurn(
+                "verify the final rendering",
+                ToolCall("browser", "browser_check", {"path": "index.html"}),
+            )
+
+        result, _, runtime, events = self.run_engine(
+            [edit_turn(), *([inspect_or_complete] * 6)],
+            options=RunOptions(max_model_turns=6),
+            objective="让网页沙子动画呈现连续、细腻的视觉效果",
+            tools=tools,
+        )
+
+        self.assertEqual(result.status, RunStatus.SUCCEEDED)
+        self.assertIn("browser_check", runtime.calls)
+        self.assertLess(inspected, 5)
+        self.assertEqual(
+            len([event for event in events.events if event.kind == "wrap_up_started"]),
+            1,
+        )
+
+    def test_cross_tool_read_only_streak_requires_a_progress_decision(self) -> None:
+        inspections = [
+            AssistantTurn("inspect", ToolCall("read-1", "read_file", {"path": "a.py"})),
+            AssistantTurn("status", ToolCall("status-1", "git_status", {})),
+            AssistantTurn("inspect", ToolCall("read-2", "read_file", {"path": "b.py"})),
+            AssistantTurn(
+                "search",
+                ToolCall("search-1", "search_text", {"path": ".", "query": "alpha"}),
+            ),
+            AssistantTurn("inspect", ToolCall("read-3", "read_file", {"path": "c.py"})),
+            AssistantTurn("status", ToolCall("status-2", "git_status", {})),
+            AssistantTurn(
+                "search",
+                ToolCall("search-2", "search_text", {"path": ".", "query": "beta"}),
+            ),
+            AssistantTurn("inspect", ToolCall("read-4", "read_file", {"path": "d.py"})),
+        ]
+
+        def edit_when_focused(request) -> AssistantTurn:
+            available = {tool.name for tool in request.tools}
+            self.assertNotIn("read_file", available)
+            self.assertNotIn("search_text", available)
+            self.assertNotIn("git_status", available)
+            self.assertNotIn("git_diff", available)
+            self.assertIn("edit_file", available)
+            self.assertIn('"progress_required": true', request.user_prompt)
+            return edit_turn()
+
+        result, _, _, events = self.run_engine(
+            [*inspections, edit_when_focused, verify_turn(), finish_from_context]
+        )
+
+        self.assertEqual(result.status, RunStatus.SUCCEEDED)
+        self.assertEqual(
+            len([event for event in events.events if event.kind == "progress_required"]),
+            1,
+        )
+
+    def test_wrap_up_rejects_a_late_edit_without_executing_it(self) -> None:
+        result, _, tools, events = self.run_engine(
+            [edit_turn(), edit_turn()],
+            options=RunOptions(max_model_turns=2),
+        )
+
+        self.assertEqual(result.status, RunStatus.FAILED)
+        self.assertEqual(result.error_code, ErrorCode.MODEL_PROTOCOL)
+        self.assertEqual(tools.calls, ["edit_file"])
+        self.assertTrue(any(event.kind == "wrap_up_started" for event in events.events))
 
     def test_identical_action_stagnation_stops_before_third_execution(self) -> None:
         same = AssistantTurn("inspect", ToolCall("same", "git_diff", {}))

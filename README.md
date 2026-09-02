@@ -205,6 +205,13 @@ observation once, then stopped with the dedicated `STAGNATION` error if the
 model ignores the corrective feedback. Exact protocol-rejection reasons are
 shown in bounded, redacted warnings rather than a generic failure line.
 
+The controller also prevents varied inspection loops from consuming the whole
+budget. `[FOCUS]` means read-only tools are paused until the model takes a
+progress action. `[WRAP-UP]` means the run has entered its reserved final turns:
+no more source edits are accepted, and the remaining choices are limited to
+verification, verification-output inspection, completion, or an explicit
+blocker.
+
 Use the explicit subcommand when passing startup options:
 
 ```powershell

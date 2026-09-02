@@ -193,6 +193,9 @@ class RunState:
     completion_evidence_ready: bool = False
     finalization_mode: bool = False
     finalization_grace_used: bool = False
+    consecutive_read_only_actions: int = 0
+    progress_required: bool = False
+    wrap_up_mode: bool = False
     initial_git_status: str = ""
     initial_git_head: str | None = None
 

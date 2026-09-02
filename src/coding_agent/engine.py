@@ -137,9 +137,25 @@ _VISUAL_OBJECTIVE_TERMS = (
     "效果",
 )
 _READ_CACHE_RECOVERY_THRESHOLD = 2
+_READ_ONLY_PROGRESS_THRESHOLD = 8
+_WRAP_UP_TURN_RESERVE = 4
+_WRAP_UP_TOOL_NAMES = {
+    "run_command",
+    "browser_check",
+    "read_output",
+    "search_output",
+    "finish",
+    "report_blocked",
+}
 _MODEL_TURN_BUDGET_EXHAUSTED = "model-turn budget exhausted"
 _FINALIZATION_MESSAGE = (
     "work-turn budget exhausted; allowing one finish-only decision"
+)
+_PROGRESS_MESSAGE = (
+    "read-only action limit reached; pausing inspection tools until progress"
+)
+_WRAP_UP_MESSAGE = (
+    "work-turn budget is low; switching to verification and completion"
 )
 
 
@@ -235,6 +251,8 @@ class AgentEngine:
                         error_code=ErrorCode.BUDGET_EXHAUSTED,
                     )
 
+                self._update_guidance_modes(state, emitter)
+
                 try:
                     turn = self._request_model(state, emitter, started)
                 except BudgetExhaustedError as exc:
@@ -299,6 +317,22 @@ class AgentEngine:
                         RunStatus.FAILED,
                         "model returned a non-terminal action during finish-only grace",
                         error_code=ErrorCode.BUDGET_EXHAUSTED,
+                    )
+                if state.wrap_up_mode and not self._is_wrap_up_action(turn.action):
+                    return self._terminal(
+                        state,
+                        emitter,
+                        RunStatus.FAILED,
+                        "model returned a work action during verification-only wrap-up",
+                        error_code=ErrorCode.MODEL_PROTOCOL,
+                    )
+                if state.progress_required and self._is_read_only_action(turn.action):
+                    return self._terminal(
+                        state,
+                        emitter,
+                        RunStatus.FAILED,
+                        "model returned another read-only action while progress was required",
+                        error_code=ErrorCode.MODEL_PROTOCOL,
                     )
                 if cached_read is not None:
                     self._record_cached_read(state, turn, cached_read, emitter)
@@ -386,6 +420,25 @@ class AgentEngine:
                     if definition.name in {"finish", "report_blocked"}
                 ),
             )
+        elif state.wrap_up_mode:
+            request = replace(
+                request,
+                tools=tuple(
+                    definition
+                    for definition in request.tools
+                    if definition.name in _WRAP_UP_TOOL_NAMES
+                ),
+            )
+        elif state.progress_required:
+            request = replace(
+                request,
+                tools=tuple(
+                    definition
+                    for definition in request.tools
+                    if definition.risk is not RiskLevel.READ_ONLY
+                    or definition.name in {"respond", "finish", "report_blocked"}
+                ),
+            )
         elif self._consecutive_cached_reads(state) >= _READ_CACHE_RECOVERY_THRESHOLD:
             request = replace(
                 request,
@@ -440,6 +493,7 @@ class AgentEngine:
 
         result = self._attach_verification(state, turn.action, result)
         state.completion_evidence_ready = _completion_evidence_ready(state)
+        self._record_tool_progress(state, turn.action.name)
         if result.error_code:
             state.recent_errors.append(f"{result.error_code.value}: {result.message}")
             state.recent_errors = state.recent_errors[-10:]
@@ -685,6 +739,48 @@ class AgentEngine:
         emitter.emit("finalization_started", message=_FINALIZATION_MESSAGE)
         return True
 
+    def _update_guidance_modes(
+        self,
+        state: RunState,
+        emitter: EventEmitter,
+    ) -> None:
+        if state.finalization_mode:
+            return
+        remaining = max(0, self.options.max_model_turns - state.model_turns)
+        has_workspace_change = state.workspace_version > 0 or bool(state.changed_files)
+        if (
+            not state.wrap_up_mode
+            and has_workspace_change
+            and remaining <= _WRAP_UP_TURN_RESERVE
+        ):
+            state.wrap_up_mode = True
+            state.progress_required = False
+            emitter.emit("wrap_up_started", message=_WRAP_UP_MESSAGE)
+            return
+        if (
+            not state.wrap_up_mode
+            and not state.progress_required
+            and state.consecutive_read_only_actions >= _READ_ONLY_PROGRESS_THRESHOLD
+        ):
+            state.progress_required = True
+            emitter.emit("progress_required", message=_PROGRESS_MESSAGE)
+
+    def _record_tool_progress(self, state: RunState, name: str) -> None:
+        if self._is_read_only_tool(name):
+            state.consecutive_read_only_actions += 1
+            return
+        state.consecutive_read_only_actions = 0
+        state.progress_required = False
+
+    @staticmethod
+    def _is_wrap_up_action(action: Action) -> bool:
+        if isinstance(action, (FinishRequest, BlockedRequest)):
+            return True
+        return isinstance(action, ToolCall) and action.name in _WRAP_UP_TOOL_NAMES
+
+    def _is_read_only_action(self, action: Action) -> bool:
+        return isinstance(action, ToolCall) and self._is_read_only_tool(action.name)
+
     def _track_action_fingerprint(self, state: RunState, action: Action) -> str | None:
         encoded = json.dumps(
             {
@@ -770,6 +866,7 @@ class AgentEngine:
             detail=describe_tool(turn.action.name, turn.action.arguments),
             reason=message,
         )
+        state.consecutive_read_only_actions += 1
 
     @staticmethod
     def _consecutive_cached_reads(state: RunState) -> int:
@@ -823,6 +920,7 @@ class AgentEngine:
             detail=describe_tool(turn.action.name, turn.action.arguments),
             reason=message,
         )
+        state.consecutive_read_only_actions += 1
 
     @staticmethod
     def _record_protocol_error(

@@ -328,6 +328,15 @@ removes older byte-identical observations for the same workspace version.
 Protocol-error events carry the bounded concrete validation reason through the
 same redaction and control-character-safe presentation path.
 
+The engine additionally projects two budget-control transitions. `[FOCUS]`
+appears after eight consecutive read-only actions across tool names and pauses
+all inspection tools until the model selects a work, verification, answer, or
+terminal action. `[WRAP-UP]` appears after a workspace mutation when four work
+turns remain; it removes source reads and mutations for the rest of the run and
+retains only verification, verification-output readers, `finish`, and
+`report_blocked`. Hidden actions are rejected before execution even if a model
+adapter returns one directly.
+
 The model protocol adds `respond(message) -> AnswerRequest`. `AgentEngine`
 accepts it as terminal `ANSWERED` only when `workspace_version == 0` and no
 changed path was recorded. After mutation it records an `answer_rejected`

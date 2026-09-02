@@ -159,6 +159,10 @@ class ConsoleEventSink(EventSink):
             )
         elif event.kind == "finalization_started":
             print(f"[FINALIZE] {_console_text(data.get('message', ''), limit=600)}")
+        elif event.kind == "progress_required":
+            print(f"[FOCUS] {_console_text(data.get('message', ''), limit=600)}")
+        elif event.kind == "wrap_up_started":
+            print(f"[WRAP-UP] {_console_text(data.get('message', ''), limit=600)}")
         elif event.kind == "terminal":
             if data.get("status") == "ANSWERED":
                 print(f"[ANSWER] {_console_text(data.get('summary', ''), limit=4_000)}")

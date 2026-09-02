@@ -38,6 +38,13 @@ finish unless you can identify a concrete unmet requirement from the objective
 or observations. In finalization_mode, the normal work-turn budget is exhausted:
 choose finish with current evidence or report_blocked. Do not attempt more work.
 
+When progress_required is true, the controller has paused read-only inspection
+after too many consecutive observations without a work or verification action.
+Use one of the available actions to edit, verify, answer, finish, or report a
+concrete blocker. When wrap_up_mode is true, the work-turn budget is low: do not
+make more source edits. Inspect command output only when necessary, obtain fresh
+verification for the current workspace version, then finish or report_blocked.
+
 For a visual web, UI, animation, or browser-interaction objective, call
 browser_check after the final web-file mutation and cite that browser
 verification when finishing. A syntax check alone is not visual evidence. The
@@ -150,8 +157,7 @@ class ContextManager:
             f"{summary}"
         )
 
-    @staticmethod
-    def _state_summary(state: RunState) -> str:
+    def _state_summary(self, state: RunState) -> str:
         verifications = [
             {
                 "verification_id": item.verification_id,
@@ -165,10 +171,16 @@ class ContextManager:
         ]
         payload = {
             "completion_evidence_ready": state.completion_evidence_ready,
+            "consecutive_read_only_actions": state.consecutive_read_only_actions,
             "status": state.status.value,
             "finalization_mode": state.finalization_mode,
             "model_turns": state.model_turns,
+            "progress_required": state.progress_required,
+            "remaining_work_turns": max(
+                0, self.options.max_model_turns - state.model_turns
+            ),
             "tool_calls": state.tool_calls,
+            "wrap_up_mode": state.wrap_up_mode,
             "workspace_version": state.workspace_version,
             "changed_files": sorted(state.changed_files),
             "verification_records": verifications,
