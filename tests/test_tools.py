@@ -27,15 +27,16 @@ class LocalToolRuntimeTests(unittest.TestCase):
             cwd=self.workspace,
             check=True,
         )
-        (self.workspace / "sample.txt").write_text("alpha\nbeta\n", encoding="utf-8")
+        (self.workspace / "sample.txt").write_bytes(b"alpha\nbeta\n")
         subprocess.run(["git", "add", "sample.txt"], cwd=self.workspace, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=self.workspace, check=True)
         self.redactor = Redactor(["unit-test-secret-value"])
         self.approvals = FixedApprovalAdapter(True)
+        self.artifacts = ArtifactStore(root / "artifacts", self.redactor)
         self.runtime = LocalToolRuntime(
             workspace=self.workspace,
             approvals=self.approvals,
-            artifacts=ArtifactStore(root / "artifacts", self.redactor),
+            artifacts=self.artifacts,
             redactor=self.redactor,
         )
 
@@ -74,6 +75,65 @@ class LocalToolRuntimeTests(unittest.TestCase):
         self.assertEqual(stale.status, ToolStatus.CONFLICT)
         self.assertEqual(stale.error_code, ErrorCode.TOOL_CONFLICT)
         self.assertEqual((self.workspace / "sample.txt").read_text(encoding="utf-8"), "alpha\ngamma\n")
+
+    def test_hash_guarded_whole_file_write_keeps_a_recovery_copy(self) -> None:
+        read = self.execute("read_file", {"path": "sample.txt"})
+
+        result = self.execute(
+            "write_file",
+            {
+                "path": "sample.txt",
+                "content": "replacement\n",
+                "expected_sha256": read.data["sha256"],
+            },
+        )
+
+        self.assertEqual(result.status, ToolStatus.COMPLETED)
+        self.assertEqual(
+            (self.workspace / "sample.txt").read_text(encoding="utf-8"),
+            "replacement\n",
+        )
+        recovery_id = result.data["recovery_output_id"]
+        recovered, total = self.artifacts.read_text(recovery_id, 0, 1_000)
+        self.assertEqual((recovered, total), ("alpha\nbeta\n", 11))
+        self.assertIn("write_file", {item.name for item in self.runtime.definitions})
+
+    def test_delete_warns_and_preserves_preexisting_untracked_file(self) -> None:
+        root = Path(self.temporary.name)
+        target = self.workspace / "index.html"
+        target.write_bytes(b"<main>original game</main>\n")
+        approvals = FixedApprovalAdapter(True)
+        artifacts = ArtifactStore(root / "delete-artifacts", self.redactor)
+        runtime = LocalToolRuntime(
+            workspace=self.workspace,
+            approvals=approvals,
+            artifacts=artifacts,
+            redactor=self.redactor,
+        )
+        runtime.initial_workspace_state()
+        digest = runtime.execute(
+            ToolCall("read", "read_file", {"path": "index.html"}),
+            "read-action",
+        ).data["sha256"]
+
+        result = runtime.execute(
+            ToolCall(
+                "delete",
+                "delete_file",
+                {"path": "index.html", "expected_sha256": digest},
+            ),
+            "delete-action",
+        )
+
+        self.assertEqual(result.status, ToolStatus.COMPLETED)
+        self.assertIn("pre-existing untracked", approvals.requests[-1].summary)
+        self.assertIn("Git cannot restore", approvals.requests[-1].summary)
+        recovered, _ = artifacts.read_text(
+            result.data["recovery_output_id"],
+            0,
+            1_000,
+        )
+        self.assertEqual(recovered, "<main>original game</main>\n")
 
     def test_rejects_path_escape_and_sensitive_file(self) -> None:
         (self.workspace / ".env").write_text("TOKEN=value", encoding="utf-8")

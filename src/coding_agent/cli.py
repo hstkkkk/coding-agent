@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import __version__
+from .artifacts import ArtifactStore
 from .conversation import (
     ConversationError,
     ConversationLimits,
@@ -84,6 +85,14 @@ def build_parser(settings: UserSettings | None = None) -> argparse.ArgumentParse
     inspect_parser = subparsers.add_parser("inspect-run", help="show a saved run log")
     inspect_parser.add_argument("run_id")
     inspect_parser.add_argument("--json", action="store_true")
+
+    recover_parser = subparsers.add_parser(
+        "recover-file",
+        help="copy a saved before-image to a new file",
+    )
+    recover_parser.add_argument("run_id")
+    recover_parser.add_argument("recovery_id")
+    recover_parser.add_argument("--output", type=Path, required=True)
 
     eval_parser = subparsers.add_parser("eval", help="run a repeatable local evaluation suite")
     eval_parser.add_argument("--suite", type=Path, required=True)
@@ -229,6 +238,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run(args)
         if args.command == "inspect-run":
             return _inspect_run(args)
+        if args.command == "recover-file":
+            return _recover_file(args)
         if args.command == "eval":
             return _eval(args)
     except (ConfigurationError, ConversationError, OSError) as exc:
@@ -414,10 +425,7 @@ def _render_workspace_setup(
 
 
 def _inspect_run(args: argparse.Namespace) -> int:
-    if len(args.run_id) != 32 or any(
-        character not in "0123456789abcdef" for character in args.run_id
-    ):
-        raise ConfigurationError("run_id must be 32 lowercase hexadecimal characters")
+    _validate_hex_id(args.run_id, "run_id")
     path = _runs_root(args.configured_runs_dir) / args.run_id / "events.jsonl"
     if not path.is_file():
         raise ConfigurationError("run log was not found")
@@ -437,6 +445,12 @@ def _inspect_run(args: argparse.Namespace) -> int:
                 f"{event['sequence']:>3} TOOL  {data.get('tool', '')} "
                 f"{data.get('status', '')}"
             )
+            recovery_id = data.get("recovery_output_id")
+            if isinstance(recovery_id, str) and recovery_id:
+                print(
+                    "    RECOVERY "
+                    f"{data.get('recovery_path', 'file')} {recovery_id}"
+                )
         elif kind == "terminal":
             label = "ANSWER" if data.get("status") == "ANSWERED" else "DONE"
             print(
@@ -444,6 +458,43 @@ def _inspect_run(args: argparse.Namespace) -> int:
                 f"{data.get('status', '')}: {data.get('summary', '')}"
             )
     return 0
+
+
+def _recover_file(args: argparse.Namespace) -> int:
+    _validate_hex_id(args.run_id, "run_id")
+    _validate_hex_id(args.recovery_id, "recovery_id")
+    artifacts_root = _runs_root(args.configured_runs_dir) / args.run_id / "artifacts"
+    if not artifacts_root.is_dir():
+        raise ConfigurationError("run artifacts were not found")
+    try:
+        store = ArtifactStore(artifacts_root, Redactor())
+        content, total = store.read_text(args.recovery_id, 0, 1_000_001)
+    except FileNotFoundError as exc:
+        raise ConfigurationError("recovery copy was not found") from exc
+    if len(content) != total:
+        raise ConfigurationError("recovery copy exceeds the supported size")
+
+    output = args.output.expanduser().resolve()
+    if not output.parent.is_dir():
+        raise ConfigurationError("recovery output directory does not exist")
+    try:
+        with output.open("x", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError as exc:
+        raise ConfigurationError("recovery output already exists") from exc
+    print(f"Recovered before-image to {output}")
+    return 0
+
+
+def _validate_hex_id(value: str, label: str) -> None:
+    if len(value) != 32 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ConfigurationError(
+            f"{label} must be 32 lowercase hexadecimal characters"
+        )
 
 
 def _eval(args: argparse.Namespace) -> int:

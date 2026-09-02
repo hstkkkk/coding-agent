@@ -116,6 +116,14 @@ class ConsoleEventSink(EventSink):
                 f"{_console_text(data.get('status', 'UNKNOWN'))} "
                 f"({data.get('duration_ms', 0)} ms)"
             )
+            recovery_id = data.get("recovery_output_id")
+            if isinstance(recovery_id, str) and recovery_id:
+                recovery_path = _console_text(data.get("recovery_path", "file"))
+                print(
+                    f"[RECOVERY] Before-image for {recovery_path} saved. Restore to "
+                    "a new file with: coding-agent recover-file "
+                    f"{event.run_id} {recovery_id} --output <path>"
+                )
         elif event.kind == "verification_rejected":
             print(f"[VERIFY] rejected: {data.get('reason', '')}")
         elif event.kind == "answer_rejected":

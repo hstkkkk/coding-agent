@@ -55,6 +55,7 @@ class LocalToolRuntime(ToolRuntime):
         self.files = FileTools(self.path_policy)
         self.git = GitInspector(self.path_policy.workspace)
         self.processes = ProcessRunner()
+        self._initial_git_status: str | None = None
         self._definitions = _definitions()
         self._definition_by_name = {item.name: item for item in self._definitions}
         self._handlers: dict[str, Callable[..., dict[str, Any]]] = {
@@ -62,6 +63,7 @@ class LocalToolRuntime(ToolRuntime):
             "read_file": self.files.read_file,
             "search_text": self.files.search_text,
             "edit_file": self.files.edit_file,
+            "write_file": self.files.write_file,
             "create_file": self.files.create_file,
             "delete_file": self.files.delete_file,
             "run_command": self._run_command,
@@ -77,6 +79,7 @@ class LocalToolRuntime(ToolRuntime):
 
     def initial_workspace_state(self) -> dict[str, Any]:
         snapshot = self.git.snapshot()
+        self._initial_git_status = snapshot.status
         return {
             "git_available": snapshot.available,
             "git_head": snapshot.head,
@@ -102,7 +105,7 @@ class LocalToolRuntime(ToolRuntime):
                 self._check_command_policy(call.arguments)
             if needs_approval(definition.risk):
                 digest = operation_digest(call.name, call.arguments)
-                summary = self.redactor.text(describe_tool(call.name, call.arguments))
+                summary = self.redactor.text(self._approval_summary(call))
                 safe_arguments = self.redactor.value(dict(call.arguments))
                 assert isinstance(safe_arguments, dict)
                 decision = self.approvals.request(
@@ -125,7 +128,11 @@ class LocalToolRuntime(ToolRuntime):
                         started,
                     )
 
+            recovery = self._capture_recovery(call)
             data = self._handlers[call.name](**call.arguments)
+            if recovery is not None:
+                data["recovery_output_id"] = recovery
+                data["recovery_path"] = call.arguments.get("path")
             status = ToolStatus.TIMED_OUT if data.pop("_timed_out", False) else ToolStatus.COMPLETED
             error_code = ErrorCode.TOOL_TIMEOUT if status is ToolStatus.TIMED_OUT else None
             exit_code = data.get("exit_code")
@@ -145,6 +152,7 @@ class LocalToolRuntime(ToolRuntime):
                 duration_ms=int((time.monotonic() - started) * 1000),
                 truncated=truncated,
             )
+
         except PolicyViolation as exc:
             return self._result(
                 action_id,
@@ -190,6 +198,61 @@ class LocalToolRuntime(ToolRuntime):
                 ErrorCode.TOOL_INTERNAL,
                 started,
             )
+
+    def _capture_recovery(self, call: ToolCall) -> str | None:
+        if call.name not in {"edit_file", "write_file", "delete_file"}:
+            return None
+        path = call.arguments.get("path")
+        expected = call.arguments.get("expected_sha256")
+        if not isinstance(path, str) or not isinstance(expected, str):
+            return None
+        original = self.files.recovery_text(
+            path=path,
+            expected_sha256=expected,
+        )
+        if self.redactor.text(original) != original:
+            raise PolicyViolation(
+                "file content requires secret redaction and cannot be snapshotted exactly"
+            )
+        recovery = self.artifacts.write_text(original)
+        if recovery.truncated:
+            raise PolicyViolation(
+                "file is too large to create a complete recovery snapshot"
+            )
+        return recovery.output_id
+
+    def _approval_summary(self, call: ToolCall) -> str:
+        summary = describe_tool(call.name, call.arguments)
+        if call.name not in {"write_file", "delete_file"}:
+            return summary
+        path = call.arguments.get("path")
+        if not isinstance(path, str):
+            return summary
+        initial_state = self._initial_path_state(path)
+        if initial_state == "untracked":
+            return (
+                summary
+                + " · pre-existing untracked file; Git cannot restore it; "
+                "recovery copy will be saved"
+            )
+        if initial_state == "modified":
+            return summary + " · pre-existing modified file; recovery copy will be saved"
+        return summary + " · recovery copy will be saved"
+
+    def _initial_path_state(self, raw_path: str) -> str | None:
+        if self._initial_git_status is None:
+            return None
+        normalized = raw_path.replace("\\", "/")
+        for line in self._initial_git_status.splitlines():
+            if len(line) < 4:
+                continue
+            candidate = line[3:].replace("\\", "/")
+            if " -> " in candidate:
+                candidate = candidate.split(" -> ", 1)[1]
+            if candidate != normalized:
+                continue
+            return "untracked" if line.startswith("?? ") else "modified"
+        return None
 
     @staticmethod
     def _result(
@@ -276,6 +339,7 @@ class LocalToolRuntime(ToolRuntime):
             "output_id": artifact.output_id,
             "output_chars": artifact.original_chars,
             "truncated": artifact.truncated or len(diff) > 12_000,
+            "artifact_truncated": artifact.truncated,
         }
 
     def _read_output(self, *, output_id: str, offset: int = 0, limit: int = 8_000) -> dict[str, Any]:
@@ -449,6 +513,20 @@ def _definitions() -> tuple[ToolDefinition, ...]:
                 required=["path", "old_text", "new_text", "expected_sha256"],
             ),
             RiskLevel.WORKSPACE_WRITE,
+        ),
+        ToolDefinition(
+            "write_file",
+            "Atomically replace one UTF-8 file if its content hash is still current; "
+            "the controller keeps a recovery copy.",
+            _object_schema(
+                {
+                    "path": path,
+                    "content": string,
+                    "expected_sha256": {"type": "string", "minLength": 64},
+                },
+                required=["path", "content", "expected_sha256"],
+            ),
+            RiskLevel.OVERWRITE,
         ),
         ToolDefinition(
             "create_file",

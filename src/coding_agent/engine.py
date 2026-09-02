@@ -375,6 +375,8 @@ class AgentEngine:
             error_code=result.error_code.value if result.error_code else None,
             duration_ms=result.duration_ms,
             workspace_version=state.workspace_version,
+            recovery_output_id=result.data.get("recovery_output_id"),
+            recovery_path=result.data.get("recovery_path"),
         )
         return result.status is ToolStatus.CANCELLED
 
@@ -442,6 +444,20 @@ class AgentEngine:
             state.recent_errors.append(f"{ErrorCode.VERIFICATION_FAILED.value}: {reason}")
             emitter.emit("verification_rejected", reason=reason)
             return None
+        output_chars = diff_result.data.get("output_chars")
+        artifact_truncated = bool(diff_result.data.get("artifact_truncated", False))
+        if not isinstance(output_chars, int) or output_chars <= 0 or artifact_truncated:
+            state.status = RunStatus.RUNNING
+            reason = "controller could not inspect a complete, non-empty final Git diff"
+            state.recent_errors.append(f"{ErrorCode.VERIFICATION_FAILED.value}: {reason}")
+            state.recent_errors = state.recent_errors[-10:]
+            emitter.emit("verification_rejected", reason=reason)
+            return None
+        emitter.emit(
+            "final_diff_inspected",
+            output_id=diff_result.data.get("output_id"),
+            output_chars=output_chars,
+        )
         return self._terminal(
             state,
             emitter,

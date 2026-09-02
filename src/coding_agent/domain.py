@@ -39,6 +39,7 @@ class ToolStatus(str, Enum):
 class RiskLevel(str, Enum):
     READ_ONLY = "READ_ONLY"
     WORKSPACE_WRITE = "WORKSPACE_WRITE"
+    OVERWRITE = "OVERWRITE"
     DELETE = "DELETE"
     EXECUTION = "EXECUTION"
 

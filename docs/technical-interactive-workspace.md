@@ -316,6 +316,16 @@ the summary by default. `d` renders the full redacted JSON with visual wrapping
 and the full digest, while `y` approves and empty input/`n` denies. The digest,
 not the display wrapping, identifies the exact operation.
 
+Existing-file edit, whole-file replacement, and deletion are recovery-backed.
+After validating the expected hash and before mutation, `LocalToolRuntime`
+stores the exact UTF-8 before-image in the current run artifact store. If
+redaction would alter the content or the artifact bound would truncate it, the
+runtime rejects the mutation. Tool events and `inspect-run` expose the opaque
+recovery ID; `recover-file` copies it to a caller-selected new path using
+exclusive creation. Git diff projection synthesizes unified patches for
+untracked UTF-8 files, and the controller accepts `finish` only after obtaining
+a complete, non-empty final diff artifact.
+
 ## CLI integration
 
 `build_parser` exposes `tui` with the same workspace, model, budget, approval,

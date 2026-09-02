@@ -16,6 +16,7 @@ from coding_agent.cli import (
     build_parser,
     main,
 )
+from coding_agent.artifacts import ArtifactStore
 from coding_agent.conversation import ConversationStore
 from coding_agent.domain import RunResult, RunStatus
 from coding_agent.events import Redactor
@@ -287,6 +288,45 @@ class CliTests(unittest.TestCase):
             exit_code = main(["inspect-run", "../outside"])
         self.assertEqual(exit_code, 5)
         self.assertIn("run_id", stderr.getvalue())
+
+    def test_recover_file_writes_before_image_without_overwriting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs_root = root / "runs"
+            run_id = "a" * 32
+            store = ArtifactStore(runs_root / run_id / "artifacts", Redactor())
+            recovery = store.write_text("original\r\ncontent\r\n")
+            output = root / "recovered.txt"
+
+            with patch("coding_agent.cli._runs_root", return_value=runs_root):
+                first = main(
+                    [
+                        "recover-file",
+                        run_id,
+                        recovery.output_id,
+                        "--output",
+                        str(output),
+                    ]
+                )
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    second = main(
+                        [
+                            "recover-file",
+                            run_id,
+                            recovery.output_id,
+                            "--output",
+                            str(output),
+                        ]
+                    )
+
+            with output.open("r", encoding="utf-8", newline="") as handle:
+                restored = handle.read()
+
+        self.assertEqual(first, 0)
+        self.assertEqual(restored, "original\r\ncontent\r\n")
+        self.assertEqual(second, 5)
+        self.assertIn("already exists", stderr.getvalue())
 
 
 if __name__ == "__main__":

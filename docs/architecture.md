@@ -113,11 +113,11 @@ partial action.
 
 ## Tool execution
 
-The model sees eleven local tools:
+The model sees twelve local tools:
 
 ```text
 list_directory  read_file      search_text
-edit_file       create_file    delete_file
+edit_file       write_file     create_file    delete_file
 run_command     git_status     git_diff
 read_output     search_output
 ```
@@ -130,9 +130,13 @@ verification gate.
 
 Filesystem paths are workspace-relative. The implementation resolves traversal,
 symbolic links, and junctions before checking containment. Direct `.git`,
-`.coding-agent`, and likely credential-file access is rejected. Edits require
-both an expected file hash and exactly one matching old-text fragment; writes
-use a temporary file and atomic replacement.
+`.coding-agent`, and likely credential-file access is rejected. Narrow edits
+require both an expected file hash and exactly one matching old-text fragment;
+whole-file replacement is separately named and approved. Writes use a temporary
+file and atomic replacement. Existing-file mutations first preserve a complete
+before-image; they stop when exact bounded recovery is unavailable. The
+approval calls out pre-existing untracked targets because Git cannot restore
+them.
 
 Commands use a program-plus-argument array with `shell=False`. They receive a
 small environment allowlist that excludes the model API key. Command execution
@@ -185,7 +189,8 @@ The model's `finish` request is accepted only when:
 1. at least one workspace change was recorded;
 2. every cited verification ID exists;
 3. at least one cited verification passed on the current version;
-4. the controller can inspect the final Git diff.
+4. the controller can inspect a complete, non-empty final Git diff, including
+   the contents of new untracked UTF-8 files.
 
 The controller proves that the evidence ran against the current state; it does
 not claim that a finite test suite proves semantic correctness.

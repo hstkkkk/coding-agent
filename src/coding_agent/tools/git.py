@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+
+_MAX_UNTRACKED_DIFF_FILE_BYTES = 1_000_000
+_MAX_UNTRACKED_DIFF_TOTAL_CHARS = 2_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,9 +62,44 @@ class GitInspector:
                 for line in (self._run("status", "--porcelain=v1", "--untracked-files=all") or "").splitlines()
                 if line.startswith("?? ")
             ]
-            if untracked:
-                result += "\n" + "\n".join(f"Untracked file: {path}" for path in untracked) + "\n"
+            for path in untracked:
+                addition = self._untracked_diff(path)
+                remaining = _MAX_UNTRACKED_DIFF_TOTAL_CHARS - len(result)
+                if remaining <= 0:
+                    result += "\n...[untracked diff truncated]...\n"
+                    break
+                result += addition[:remaining]
+                if len(addition) > remaining:
+                    result += "\n...[untracked diff truncated]...\n"
+                    break
         return result
+
+    def _untracked_diff(self, raw_path: str) -> str:
+        path = self.workspace / raw_path
+        header = (
+            f"\ndiff --git a/{raw_path} b/{raw_path}\n"
+            "new file mode 100644\n"
+        )
+        try:
+            if not path.is_file() or path.is_symlink():
+                return header + f"Untracked non-regular file: {raw_path}\n"
+            if path.stat().st_size > _MAX_UNTRACKED_DIFF_FILE_BYTES:
+                return header + f"Untracked file too large to preview: {raw_path}\n"
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return header + f"Binary untracked file: {raw_path}\n"
+        except OSError:
+            return header + f"Unreadable untracked file: {raw_path}\n"
+
+        patch = difflib.unified_diff(
+            (),
+            content.splitlines(),
+            fromfile="/dev/null",
+            tofile=f"b/{raw_path}",
+            lineterm="",
+        )
+        rendered = "\n".join(patch)
+        return header + rendered + ("\n" if rendered else "")
 
     def _fingerprint(self, status: str, changed: list[str]) -> str:
         digest = hashlib.sha256(status.encode("utf-8", errors="replace"))

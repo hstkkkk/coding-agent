@@ -193,12 +193,13 @@ class ScopedApprovalAdapter(ApprovalPort):
 
 
 def needs_approval(risk: RiskLevel) -> bool:
-    return risk in {RiskLevel.DELETE, RiskLevel.EXECUTION}
+    return risk in {RiskLevel.OVERWRITE, RiskLevel.DELETE, RiskLevel.EXECUTION}
 
 
 def _approval_action(tool_name: str) -> str:
     return {
         "run_command": "Run a local program",
+        "write_file": "Replace a workspace file",
         "delete_file": "Delete a workspace file",
     }.get(tool_name, tool_name)
 
@@ -206,6 +207,8 @@ def _approval_action(tool_name: str) -> str:
 def _risk_description(risk: RiskLevel) -> str:
     if risk is RiskLevel.EXECUTION:
         return "Runs with your operating-system account permissions."
+    if risk is RiskLevel.OVERWRITE:
+        return "Replaces the complete contents of the named workspace file."
     if risk is RiskLevel.DELETE:
         return "Permanently removes the named workspace file."
     return "Changes the current workspace."

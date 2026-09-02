@@ -48,7 +48,8 @@ class ArtifactStore:
     def read_text(self, output_id: str, offset: int, limit: int) -> tuple[str, int]:
         if offset < 0 or limit <= 0:
             raise ValueError("offset must be non-negative and limit must be positive")
-        text = self._path(output_id).read_text(encoding="utf-8")
+        with self._path(output_id).open("r", encoding="utf-8", newline="") as handle:
+            text = handle.read()
         return text[offset : offset + limit], len(text)
 
     def search(self, output_id: str, pattern: str, max_results: int) -> list[dict[str, object]]:

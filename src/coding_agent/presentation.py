@@ -31,7 +31,7 @@ def describe_tool(tool_name: str, arguments: Mapping[str, Any]) -> str:
         return _join([_path(arguments), f"query={length} chars"])
     if tool_name == "edit_file":
         return _path(arguments)
-    if tool_name == "create_file":
+    if tool_name in {"create_file", "write_file"}:
         content = arguments.get("content")
         length = len(content) if isinstance(content, str) else 0
         return _join([_path(arguments), f"{length} chars"])
@@ -77,7 +77,7 @@ def describe_tool_result(
         matches = data.get("matches")
         count = len(matches) if isinstance(matches, list) else 0
         return _join([_path(arguments), _count(count, "match")])
-    if tool_name in {"edit_file", "create_file", "delete_file"}:
+    if tool_name in {"edit_file", "write_file", "create_file", "delete_file"}:
         parts = [_path(arguments)]
         if data.get("workspace_changed") is True or tool_name == "delete_file":
             parts.append("changed")

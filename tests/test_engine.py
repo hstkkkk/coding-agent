@@ -30,13 +30,15 @@ TOOL_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": True}
 
 
 class FakeToolRuntime:
-    def __init__(self) -> None:
+    def __init__(self, *, diff_chars: int = 10, diff_truncated: bool = False) -> None:
         self.definitions = (
             ToolDefinition("edit_file", "edit", TOOL_SCHEMA, RiskLevel.WORKSPACE_WRITE),
             ToolDefinition("run_command", "run", TOOL_SCHEMA, RiskLevel.EXECUTION),
             ToolDefinition("git_diff", "diff", TOOL_SCHEMA, RiskLevel.READ_ONLY),
         )
         self.calls: list[str] = []
+        self.diff_chars = diff_chars
+        self.diff_truncated = diff_truncated
 
     def initial_workspace_state(self):
         return {"git_available": True, "git_head": "abc", "git_status": ""}
@@ -64,7 +66,18 @@ class FakeToolRuntime:
                     "changed_files": ["app.py"],
                 },
             )
-        return ToolResult(action_id, call.name, ToolStatus.COMPLETED, "diff", data={})
+        return ToolResult(
+            action_id,
+            call.name,
+            ToolStatus.COMPLETED,
+            "diff",
+            data={
+                "output_id": "d" * 32,
+                "output_chars": self.diff_chars,
+                "truncated": self.diff_truncated,
+                "artifact_truncated": self.diff_truncated,
+            },
+        )
 
 
 class FakeClock:
@@ -119,9 +132,10 @@ class AgentEngineTests(unittest.TestCase):
         options: RunOptions | None = None,
         clock=None,
         objective: str = "fix the bug",
+        tools: FakeToolRuntime | None = None,
     ):
         model = ScriptedModelAdapter(responses)
-        tools = FakeToolRuntime()
+        tools = tools or FakeToolRuntime()
         events = InMemoryEventSink()
         engine = AgentEngine(model=model, tools=tools, events=events, options=options, clock=clock)
         result = engine.run(TaskRequest(objective, self.workspace))
@@ -194,6 +208,33 @@ class AgentEngineTests(unittest.TestCase):
 
         self.assertEqual(result.status, RunStatus.BLOCKED)
         self.assertTrue(any(event.kind == "verification_rejected" for event in events.events))
+
+    def test_finish_rejects_an_empty_or_truncated_final_diff(self) -> None:
+        for tools in (
+            FakeToolRuntime(diff_chars=0),
+            FakeToolRuntime(diff_chars=20, diff_truncated=True),
+        ):
+            with self.subTest(diff_chars=tools.diff_chars, truncated=tools.diff_truncated):
+                result, _, _, events = self.run_engine(
+                    [
+                        edit_turn(),
+                        verify_turn(),
+                        finish_from_context,
+                        AssistantTurn(
+                            "cannot produce an inspectable diff",
+                            BlockedRequest("blocked", "final diff unavailable"),
+                        ),
+                    ],
+                    tools=tools,
+                )
+
+                self.assertEqual(result.status, RunStatus.BLOCKED)
+                reasons = [
+                    event.data.get("reason", "")
+                    for event in events.events
+                    if event.kind == "verification_rejected"
+                ]
+                self.assertTrue(any("final Git diff" in reason for reason in reasons))
 
     def test_old_verification_becomes_stale_after_another_edit(self) -> None:
         result, _, _, _ = self.run_engine(

@@ -8,9 +8,12 @@ permissions.
 
 - workspace-relative path validation after canonicalization;
 - rejection of direct `.git`, `.coding-agent`, and likely credential-file access;
-- hash-guarded edits and explicit create/delete operations;
+- hash-guarded edits and explicit create/replace/delete operations;
+- exact, bounded before-image recovery artifacts for edit, replacement, and deletion,
+  with the mutation rejected when safe complete storage is unavailable;
 - no shell interpretation for normal commands;
-- interactive approval for command execution and deletion;
+- interactive approval for command execution, whole-file replacement, and
+  deletion, including an explicit warning for pre-existing untracked targets;
 - bounded approval summaries with on-demand redacted arguments bound to the
   exact operation digest;
 - explicit, executable-scoped pre-approval for automated runs;
@@ -33,6 +36,12 @@ permissions.
   requests/outcomes, never approval decisions, verification evidence, tool
   state, or an in-flight controller;
 - process-tree termination on timeout or cancellation.
+
+Recovery artifacts use the same restricted run storage and redaction boundary
+as other artifacts. Because a redacted before-image would not be faithful, an
+existing-file mutation is rejected when secret filtering would alter the
+content. `recover-file` writes only to a new destination and refuses to
+overwrite an existing path.
 
 `ANSWERED` is deliberately separate from verified coding success. The
 controller accepts `respond` only before any recorded workspace mutation, and

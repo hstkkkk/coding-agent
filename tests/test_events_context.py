@@ -75,6 +75,36 @@ class EventAndContextTests(unittest.TestCase):
 
         self.assertEqual(output.getvalue(), "[ANSWER] I am a coding agent.\n")
 
+    def test_console_reports_how_to_restore_a_before_image(self) -> None:
+        output = io.StringIO()
+        recovery_id = "b" * 32
+
+        with redirect_stdout(output):
+            ConsoleEventSink().emit(
+                RunEvent(
+                    run_id="a" * 32,
+                    sequence=1,
+                    kind="tool_finished",
+                    timestamp="now",
+                    data={
+                        "tool": "write_file",
+                        "detail": "path=index.html · changed",
+                        "status": "COMPLETED",
+                        "duration_ms": 4,
+                        "recovery_output_id": recovery_id,
+                        "recovery_path": "index.html",
+                    },
+                )
+            )
+
+        rendered = output.getvalue()
+        self.assertIn("[RECOVERY]", rendered)
+        self.assertIn(
+            f"coding-agent recover-file {'a' * 32} {recovery_id}",
+            rendered,
+        )
+        self.assertIn("index.html", rendered)
+
     def test_redacts_known_and_pattern_secrets_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"

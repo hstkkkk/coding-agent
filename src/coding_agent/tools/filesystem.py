@@ -199,6 +199,48 @@ class FileTools:
             "workspace_changed": True,
         }
 
+    def write_file(
+        self,
+        *,
+        path: str,
+        content: str,
+        expected_sha256: str,
+    ) -> dict[str, Any]:
+        if len(content) > self.max_write_chars:
+            raise ToolInputError("replacement content exceeds the configured size limit")
+        target = self.policy.resolve(path, write=True)
+        if not target.is_file():
+            raise ToolInputError("path is not a file")
+        self._ensure_bounded_file(target)
+        actual_hash = file_sha256(target)
+        if actual_hash != expected_sha256:
+            raise EditConflict(f"file hash changed; current sha256 is {actual_hash}")
+        self._atomic_replace(target, content)
+        relative = target.relative_to(self.policy.workspace).as_posix()
+        return {
+            "path": relative,
+            "old_sha256": actual_hash,
+            "new_sha256": file_sha256(target),
+            "changed_files": [relative],
+            "workspace_changed": True,
+        }
+
+    def recovery_text(self, *, path: str, expected_sha256: str) -> str:
+        """Return the exact current UTF-8 content after validating its hash."""
+
+        target = self.policy.resolve(path, write=True)
+        if not target.is_file():
+            raise ToolInputError("path is not a file")
+        self._ensure_bounded_file(target)
+        actual_hash = file_sha256(target)
+        if actual_hash != expected_sha256:
+            raise EditConflict(f"file hash changed; current sha256 is {actual_hash}")
+        try:
+            with target.open("r", encoding="utf-8", newline="") as handle:
+                return handle.read()
+        except UnicodeDecodeError as exc:
+            raise ToolInputError("only UTF-8 text files are supported") from exc
+
     def create_file(self, *, path: str, content: str) -> dict[str, Any]:
         if len(content) > self.max_write_chars:
             raise ToolInputError("new file content exceeds the configured size limit")

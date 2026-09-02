@@ -227,8 +227,12 @@ user's configured Git identity. Existing repositories are not modified during
 startup. A subdirectory of an enclosing repository is rejected; run from that
 repository's root instead.
 
-By default, command execution and deletion require an exact interactive
-approval. Read-only tools and hash-guarded workspace edits run automatically.
+By default, command execution, whole-file replacement, and deletion require an
+exact interactive approval. Read-only tools and narrow hash-guarded edits run
+automatically. Before editing, replacing, or deleting an existing UTF-8 file, the
+controller stores a complete redacted before-image. If an exact recovery copy
+cannot be stored, the operation is rejected. The approval warns explicitly
+when a pre-existing untracked file cannot be restored by Git.
 For a controlled demo, an executable can be pre-authorized explicitly:
 
 ```bash
@@ -272,6 +276,17 @@ Interactive session logs use `sessions_dir` from user settings,
 coding-agent inspect-run <run-id>
 coding-agent inspect-run <run-id> --json
 ```
+
+Run inspection prints recovery IDs beside existing-file mutations. Restore
+one to a new path (existing destinations are never overwritten) with:
+
+```powershell
+coding-agent recover-file <run-id> <recovery-id> --output recovered-file.txt
+```
+
+The final completion gate reads the complete Git diff, including the contents
+of new untracked UTF-8 files. An empty or internally truncated diff cannot be
+used to claim success.
 
 ## Test
 
